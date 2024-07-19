@@ -1,0 +1,5 @@
+*build
+*data
+*.lock*
+*.waf*
+.clang*
