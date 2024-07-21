@@ -1,0 +1,3 @@
+[submodule "submodules/kmeans-torch-cpp"]
+	path = submodules/kmeans-torch-cpp
+	url = git@github.com:iamtsac/kmeans-torch-cpp.git
