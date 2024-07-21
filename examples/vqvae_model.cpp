@@ -1,4 +1,6 @@
-#include "modules.hpp"
+#include "butane/butane.h"
+
+using namespace nn;
 
 
 int main(int argc, char** argv)
@@ -23,15 +25,13 @@ int main(int argc, char** argv)
 
     Quantizer quant(3, 10);
 
-    torch::nn::Sequential encoder(c_enc, flatten(1), mlp_enc);
-    torch::nn::Sequential decoder(mlp_dec, unflatten(1, con_out_sz), c_dec);
+    torch::nn::Sequential encoder(c_enc, functional::flatten(1), mlp_enc);
+    torch::nn::Sequential decoder(mlp_dec, functional::unflatten(1, con_out_sz), c_dec);
 
     VQVAE<Quantizer> model(encoder, decoder, quant);
 
     std::cout << model << std::endl;
     std::cout << model->centers() << std::endl;
-
-    // std::cout << model->forward(torch::rand({1, 2, 10, 10})) << std::endl;
 
     return 0;
 }

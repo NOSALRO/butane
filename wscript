@@ -10,7 +10,7 @@ import glob
 sys.path.insert(0, sys.path[0] + "/waf_tools")
 
 VERSION = "1.0.0"
-APPNAME = "model_factory"
+APPNAME = "butane"
 
 srcdir = "."
 blddir = "build"
@@ -25,10 +25,7 @@ def options(opt):
     opt.load("compiler_c")
     opt.load('boost')
     opt.load("torch")
-    opt.load("algevo")
     opt.load("eigen")
-    opt.load("opencv")
-    opt.load("tbb")
     opt.load("misc")
     opt.add_option("--tests", action="store_true", help="Compile Tests", dest="tests")
 
@@ -42,16 +39,12 @@ def configure(conf):
     conf.load('boost')
     conf.load("torch")
     conf.load("eigen")
-    conf.load("opencv")
-    conf.load("tbb")
 
     # we need pthread for video saving
     # conf.check(features='cxx cxxprogram', lib=['pthread'], uselib_store='PTHREAD')
     conf.check_boost(required=True)
     conf.check_torch(required=True)
     conf.check_eigen(required=True)
-    conf.check_opencv(required=False)
-    conf.check_tbb(required=False)
     conf.check_misc(required=False)
 
     conf.check(features="cxx cxxprogram", lib=["pthread"], uselib_store="PTHREAD")
@@ -81,56 +74,22 @@ def configure(conf):
 
 def build(bld):
     # compilation of experiment
-    libs = "TORCH EIGEN FASTSIM OPENCV TBB BOOST"
+    libs = "TORCH EIGEN BOOST"
 
-    experiments, tests, srcs = [], [], []
+    examples = []
 
     for root, dirs, files in os.walk("./examples/"):
         for f in files:
             if f.endswith("cpp"):
-                experiments.append(f"{root}/{f}")
+                examples.append(f"{root}/{f}")
 
-    # for root, dirs, files in os.walk("./tests/"):
-    #     for f in files:
-    #         if f.endswith("cpp"):
-    #             tests.append(f"{root}{f}")
-
-    for root, dirs, files in os.walk("./src/"):
-        for f in files:
-            if f.endswith("cpp"):
-                srcs.append(f"{root}/{f}")
-
-    # First create lib
-    # bld.program(
-    #     features="cxxstlib",
-    #     source=srcs,
-    #     includes="./src/",
-    #     uselib=libs,
-    #     defines=[],
-    #     target="modelfactory",
-    # )
-
-    # Then compile rest (experiments)
-    for experiment in experiments:
+    for example in examples:
         bld.program(
             features="cxx",
             install_path=None,
-            source=[experiment],
-            includes="./src/model_factory",
+            source=[example],
+            includes="./",
             uselib=libs,
-            # use="modelfactory",
             # target="/".join(experiment.split("/")[2:]).split(".")[0],
-            target=experiment.split("/")[-1].split('.')[0]
+            target=example.split("/")[-1].split('.')[0]
         )
-    # if bld.options.tests:
-    #     # (tests)
-    #     for test in tests:
-    #         bld.program(
-    #             features="cxx",
-    #             install_path=None,
-    #             source=[test],
-    #             includes="./",
-    #             uselib=libs,
-    #             use="modelfactory",
-    #             target=test.split("/")[-1].split('.')[0]
-    #         )

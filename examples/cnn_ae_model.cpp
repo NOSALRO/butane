@@ -1,5 +1,6 @@
-#include "modules.hpp"
+#include "butane/butane.h"
 
+using namespace nn;
 
 int main(int argc, char** argv)
 {
@@ -21,10 +22,10 @@ int main(int argc, char** argv)
 
     MLPBlock mlp_dec(3, con_out_sz.prod().item<int>(), std::vector<int64_t>{64, 64});
 
-    torch::nn::Sequential encoder(c_enc, flatten(1), mlp_enc);
-    torch::nn::Sequential decoder(mlp_dec, unflatten(1, con_out_sz), c_dec);
+    torch::nn::Sequential encoder(c_enc, functional::flatten(1), mlp_enc);
+    torch::nn::Sequential decoder(mlp_dec, functional::unflatten(1, con_out_sz), c_dec);
 
-    AE model(encoder, decoder, 3);
+    AE model(encoder, decoder);
 
     std::cout << model << std::endl;
 

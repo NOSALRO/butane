@@ -1,4 +1,6 @@
-#include "modules.hpp"
+#include "butane/butane.h"
+
+using namespace nn;
 
 int main(int argc, char** argv)
 {

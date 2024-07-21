@@ -1,4 +1,6 @@
-#include "modules.hpp"
+#include "butane/butane.h"
+
+using namespace nn;
 
 int main(int argc, char** argv)
 {
@@ -15,7 +17,7 @@ int main(int argc, char** argv)
 
     MLPBlock mlp(c->output_size().prod().item<int>(), 10, std::vector<int64_t>{64, 64}, AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::LogSoftmax(-1)}, true);
 
-    torch::nn::Sequential model(c, flatten(1), mlp);
+    torch::nn::Sequential model(c, functional::flatten(1), mlp);
     model->to(dev);
     std::cout << model << std::endl;
 
