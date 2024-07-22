@@ -1,6 +1,7 @@
 *.git
 *build
 *data
+!butane/data
 *.lock*
 *.waf*
 .clang*
