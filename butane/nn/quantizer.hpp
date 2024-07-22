@@ -1,16 +1,22 @@
 #pragma once
 
 #include "nn.hpp"
+#include <torch_kmeans/kmeans.hpp>
 
 namespace nn {
     class QuantizerImpl : public torch::nn::Module {
     public:
         torch::nn::Embedding embedding{nullptr};
 
-        QuantizerImpl(int latent_dim, int n_centers, bool constrained_latent_space = false, torch::Device device = torch::Device(torch::kCPU)) : _latent_dim(latent_dim), _n_centers(n_centers), _constrained_latent_space(constrained_latent_space), _device(device)
+        QuantizerImpl(
+            int latent_dim,
+            int n_centers,
+            torch::Device device = torch::Device(torch::kCPU)) : _latent_dim(latent_dim), _n_centers(n_centers), _device(device)
         {
-            embedding = register_module("embeddings", torch::nn::Embedding(_n_centers, _latent_dim));
-            this->reset();
+            embedding = torch::nn::Embedding(_n_centers, _latent_dim);
+            embedding->weight.data().uniform_(-1 / _n_centers, 1 / _n_centers);
+            embedding->weight.set_requires_grad(true);
+            embedding = register_module("embeddings", embedding);
         }
 
         std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
@@ -34,17 +40,19 @@ namespace nn {
             return {quantized_latents, quantization_loss};
         }
 
-        void reset()
+        void init_codebook(double low, double high)
         {
-            // if (_constrained_latent_space) {
-            //     torch::Tensor rdata = torch::empty({_n_centers * 400, _latent_dim}).uniform_(-1, 1);
-            //     rdata = rdata.to(_device);
-            //     torch_kmeans::Kmeans kmeans(_n_centers, "kmeans++", 1e-18, -1);
-            //     kmeans.fit(rdata);
-            //     embedding->weight.set_data(kmeans.clusters());
-            // }
-            // else
-            embedding->weight.data().uniform_(-1 / _n_centers, 1 / _n_centers);
+            embedding->weight.data().uniform_(low, high);
+            embedding->weight.set_requires_grad(true);
+        }
+
+        void init_codebook_kmeans(double low, double high)
+        {
+            torch::Tensor rdata = torch::empty({_n_centers * 400, _latent_dim}).uniform_(low, high);
+            rdata = rdata.to(_device);
+            torch_kmeans::Kmeans kmeans(_n_centers, "kmeans++", 1e-18, -1);
+            kmeans.fit(rdata);
+            embedding->weight.set_data(kmeans.clusters());
             embedding->weight.set_requires_grad(true);
         }
 
@@ -72,7 +80,7 @@ namespace nn {
 
     class Quantizer2dImpl : public QuantizerImpl {
     public:
-        Quantizer2dImpl(int latent_dim, int n_centers, bool constrained_latent_space = false, torch::Device device = torch::Device(torch::kCPU)) : QuantizerImpl(latent_dim, n_centers, constrained_latent_space, device) {}
+        using QuantizerImpl::QuantizerImpl;
 
         std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
         {

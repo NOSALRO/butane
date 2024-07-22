@@ -37,10 +37,9 @@ namespace nn {
                 torch::nn::Conv3d>::type>::type;
     }; // namespace dtypes
 
-    class ModelBase {
-    protected:
+    namespace utils {
         template <typename T>
-        bool vec_of_zeros(const std::vector<T>& v)
+        bool _vec_of_zeros(const std::vector<T>& v)
         {
             return std::all_of(v.begin(), v.end(), [](const T& i) { return i == 0; });
         }
@@ -59,5 +58,5 @@ namespace nn {
                 if (i.size() == 1)
                     i = DefaultValue(N, i[0]);
         }
-    };
+    } // namespace utils
 } // namespace nn

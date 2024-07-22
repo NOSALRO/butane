@@ -17,7 +17,7 @@ int main(int argc, char** argv)
 
     MLPBlock mlp_enc(c_enc->output_size().prod().item<int>(), 100, std::vector<int64_t>{64, 64}, AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::ReLU()}, false);
 
-    Quantizer quantizer(100, 10, false, dev);
+    Quantizer quantizer(100, 10, dev);
     quantizer->set_beta(1.25);
 
     MLPBlock mlp_dec(100, c_enc->output_size().prod().item<int>(), std::vector<int64_t>{64, 64}, AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::ReLU()}, false);

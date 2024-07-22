@@ -3,7 +3,7 @@
 #include "nn.hpp"
 
 namespace nn {
-    class MLPBlockImpl : public torch::nn::Module, private ModelBase {
+    class MLPBlockImpl : public torch::nn::Module {
     public:
         using ivec = dtypes::ivec;
         using dvec = dtypes::dvec;
@@ -23,8 +23,8 @@ namespace nn {
             assert((activation_function.size() == n_layers || activation_function.size() == 1) && "Activation Functions size should be 1 or N layers");
             assert((dropout.size() == n_layers || dropout.size() == 1) && "Dropout size should be 1 or N layers");
 
-            this->_fill_defaults(activation_function, n_layers);
-            this->_fill_defaults(dropout, n_layers);
+            utils::_fill_defaults(activation_function, n_layers);
+            utils::_fill_defaults(dropout, n_layers);
 
             if (!output_activation) {
                 activation_function.set(activation_function.size() - 1, torch::nn::Identity());

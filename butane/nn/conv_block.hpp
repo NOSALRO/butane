@@ -4,7 +4,7 @@
 
 namespace nn {
     template <int N, typename Norm, typename Pool>
-    class ConvNdBlockImpl : public torch::nn::Module, private ModelBase {
+    class ConvNdBlockImpl : public torch::nn::Module {
     public:
         using ivec = dtypes::ivec;
         using ivec2d = dtypes::ivec2d;
@@ -74,24 +74,24 @@ namespace nn {
             assert((dropout.size() == n_blocks || dropout.size() == 1) && "Dropout size should be 1 or N_Channels");
             assert((normalization.size() == n_blocks || normalization.size() == 1) && "Normalization size should be 1 or N_Channels");
 
-            this->_fill_vec_defaults(conv_kernels, N);
-            this->_fill_vec_defaults(conv_stride, N);
-            this->_fill_vec_defaults(conv_pad, N);
-            this->_fill_vec_defaults(pool_kernels, N);
-            this->_fill_vec_defaults(pool_stride, N);
-            this->_fill_vec_defaults(pool_pad, N);
+            utils::_fill_vec_defaults(conv_kernels, N);
+            utils::_fill_vec_defaults(conv_stride, N);
+            utils::_fill_vec_defaults(conv_pad, N);
+            utils::_fill_vec_defaults(pool_kernels, N);
+            utils::_fill_vec_defaults(pool_stride, N);
+            utils::_fill_vec_defaults(pool_pad, N);
 
-            this->_fill_defaults(activation_function, n_blocks);
-            this->_fill_defaults(conv_kernels, n_blocks);
-            this->_fill_defaults(conv_stride, n_blocks);
-            this->_fill_defaults(conv_pad, n_blocks);
-            this->_fill_defaults(conv_pad_mode, n_blocks);
-            this->_fill_defaults(conv_bias, n_blocks);
-            this->_fill_defaults(pool_kernels, n_blocks);
-            this->_fill_defaults(pool_stride, n_blocks);
-            this->_fill_defaults(pool_pad, n_blocks);
-            this->_fill_defaults(normalization, n_blocks);
-            this->_fill_defaults(dropout, n_blocks);
+            utils::_fill_defaults(activation_function, n_blocks);
+            utils::_fill_defaults(conv_kernels, n_blocks);
+            utils::_fill_defaults(conv_stride, n_blocks);
+            utils::_fill_defaults(conv_pad, n_blocks);
+            utils::_fill_defaults(conv_pad_mode, n_blocks);
+            utils::_fill_defaults(conv_bias, n_blocks);
+            utils::_fill_defaults(pool_kernels, n_blocks);
+            utils::_fill_defaults(pool_stride, n_blocks);
+            utils::_fill_defaults(pool_pad, n_blocks);
+            utils::_fill_defaults(normalization, n_blocks);
+            utils::_fill_defaults(dropout, n_blocks);
 
             if (!output_activation) {
                 activation_function.set(activation_function.size() - 1, torch::nn::Identity());
@@ -160,7 +160,7 @@ namespace nn {
             normalization ? _seq->push_back(Norm(out_channels)) : noop;
             _seq->push_back(af);
 
-            if (!this->vec_of_zeros(pool_kernel)) {
+            if (!utils::_vec_of_zeros(pool_kernel)) {
                 auto pool_opts = Pool(0)->options;
                 pool_opts.kernel_size(pool_kernel).stride(pool_stride).padding(pool_pad);
                 _seq->push_back(Pool(pool_opts));
@@ -186,7 +186,7 @@ namespace nn {
     TORCH_MODULE_TEMPLATED(Conv3dBlock);
 
     template <int N, typename Norm, typename Pool>
-    class ConvTransposeNdBlockImpl : public torch::nn::Module, private ModelBase {
+    class ConvTransposeNdBlockImpl : public torch::nn::Module {
     public:
         using ivec = dtypes::ivec;
         using ivec2d = dtypes::ivec2d;
@@ -256,25 +256,25 @@ namespace nn {
             assert((dropout.size() == n_blocks || dropout.size() == 1) && "Dropout size should be 1 or N_Channels");
             assert((normalization.size() == n_blocks || normalization.size() == 1) && "Normalization size should be 1 or N_Channels");
 
-            this->_fill_vec_defaults(conv_kernels, N);
-            this->_fill_vec_defaults(conv_stride, N);
-            this->_fill_vec_defaults(conv_pad, N);
-            this->_fill_vec_defaults(conv_output_pad, N);
-            this->_fill_vec_defaults(pool_kernels, N);
-            this->_fill_vec_defaults(pool_stride, N);
-            this->_fill_vec_defaults(pool_pad, N);
+            utils::_fill_vec_defaults(conv_kernels, N);
+            utils::_fill_vec_defaults(conv_stride, N);
+            utils::_fill_vec_defaults(conv_pad, N);
+            utils::_fill_vec_defaults(conv_output_pad, N);
+            utils::_fill_vec_defaults(pool_kernels, N);
+            utils::_fill_vec_defaults(pool_stride, N);
+            utils::_fill_vec_defaults(pool_pad, N);
 
-            this->_fill_defaults(activation_function, n_blocks);
-            this->_fill_defaults(conv_kernels, n_blocks);
-            this->_fill_defaults(conv_stride, n_blocks);
-            this->_fill_defaults(conv_pad, n_blocks);
-            this->_fill_defaults(conv_output_pad, n_blocks);
-            this->_fill_defaults(conv_bias, n_blocks);
-            this->_fill_defaults(pool_kernels, n_blocks);
-            this->_fill_defaults(pool_stride, n_blocks);
-            this->_fill_defaults(pool_pad, n_blocks);
-            this->_fill_defaults(normalization, n_blocks);
-            this->_fill_defaults(dropout, n_blocks);
+            utils::_fill_defaults(activation_function, n_blocks);
+            utils::_fill_defaults(conv_kernels, n_blocks);
+            utils::_fill_defaults(conv_stride, n_blocks);
+            utils::_fill_defaults(conv_pad, n_blocks);
+            utils::_fill_defaults(conv_output_pad, n_blocks);
+            utils::_fill_defaults(conv_bias, n_blocks);
+            utils::_fill_defaults(pool_kernels, n_blocks);
+            utils::_fill_defaults(pool_stride, n_blocks);
+            utils::_fill_defaults(pool_pad, n_blocks);
+            utils::_fill_defaults(normalization, n_blocks);
+            utils::_fill_defaults(dropout, n_blocks);
 
             if (!output_activation) {
                 activation_function.set(activation_function.size() - 1, torch::nn::Identity());
@@ -333,7 +333,7 @@ namespace nn {
             normalization ? _seq->push_back(Norm(out_channels)) : noop;
             _seq->push_back(af);
 
-            if (!this->vec_of_zeros(pool_kernel)) {
+            if (!utils::_vec_of_zeros(pool_kernel)) {
                 auto pool_opts = Pool(0)->options;
                 pool_opts.kernel_size(pool_kernel).stride(pool_stride).padding(pool_pad);
                 _seq->push_back(Pool(pool_opts));

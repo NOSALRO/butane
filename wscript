@@ -74,7 +74,7 @@ def configure(conf):
 
 def build(bld):
     # compilation of experiment
-    libs = "TORCH EIGEN BOOST"
+    libs = "TORCH EIGEN BOOST TORCH_KMEANS"
 
     examples = []
 

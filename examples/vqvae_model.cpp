@@ -19,11 +19,12 @@ int main(int argc, char** argv)
         AnyModuleList{torch::nn::ReLU(), torch::nn::GELU()},
         std::vector<std::vector<int64_t>>{{1}, {2, 3}});
 
-    MLPBlock mlp_enc(con_out_sz.prod().item<int>(), 3, std::vector<int64_t>{64, 64});
+    MLPBlock mlp_enc(con_out_sz.prod().item<int>(), 2, std::vector<int64_t>{64, 64});
 
-    MLPBlock mlp_dec(3, con_out_sz.prod().item<int>(), std::vector<int64_t>{64, 64});
+    MLPBlock mlp_dec(2, con_out_sz.prod().item<int>(), std::vector<int64_t>{64, 64});
 
-    Quantizer quant(3, 10);
+    Quantizer quant(2, 100);
+    quant->init_codebook_kmeans(-100, 100);
 
     torch::nn::Sequential encoder(c_enc, functional::flatten(1), mlp_enc);
     torch::nn::Sequential decoder(mlp_dec, functional::unflatten(1, con_out_sz), c_dec);

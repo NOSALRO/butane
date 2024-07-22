@@ -8,15 +8,17 @@ int main(int argc, char** argv)
         .channels = {32, 32},
         .activation_function = {torch::nn::GELU(), torch::nn::GELU()},
         .conv_stride = {{1}, {1}},
+        .conv_bias = {true},
         .pool_kernels = {{0}, {0}},
         .normalization = {true, true}};
 
     nn::Conv2dBlock<torch::nn::BatchNorm2d, torch::nn::MaxPool2d> c_enc(co_enc);
 
-    nn::MLPBlock mlp_enc(c_enc->output_size().prod().item<int>(), 100, std::vector<int64_t>{64, 64}, nn::AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::ReLU()}, false);
+    nn::MLPBlock mlp_enc(c_enc->output_size().prod().item<int>(), 100, std::vector<int64_t>{64, 64}, nn::AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::Tanh()}, false);
 
-    nn::Quantizer quantizer(100, 10, false, dev);
+    nn::Quantizer quantizer(100, 10, dev);
     quantizer->set_beta(1.25);
+    quantizer->init_codebook_kmeans(-.3, .3);
 
     nn::MLPBlock mlp_dec(100, c_enc->output_size().prod().item<int>(), std::vector<int64_t>{64, 64}, nn::AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::ReLU()}, false);
 
@@ -25,6 +27,7 @@ int main(int argc, char** argv)
         .channels = {32, 1},
         .activation_function = {torch::nn::GELU(), torch::nn::Sigmoid()},
         .conv_stride = {{1}, {1}},
+        .conv_bias = {true},
         .pool_kernels = {{0}, {0}},
         .output_activation = false,
         .normalization = {false, false}};
