@@ -1,32 +1,23 @@
+#include <typeinfo>
 #include "butane/butane.h"
+#include "butane/data/dataloader.hpp"
 
 int main(int argc, char** argv)
 {
     torch::Device dev(torch::kCUDA);
-    auto train_dataset = torch::data::datasets::MNIST("./data/").map(torch::data::transforms::Stack<>());
-    auto data_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(std::move(train_dataset), 128);
 
-    data::Dataset ds;
+    data::Dataset ds("data/mnist_data.pt", "data/mnist_targets.pt");
+    std::cout << ds.data().sizes()  << " " << ds.targets().sizes() << std::endl;
 
-    int iters = 0;
-    for (auto& batch : *data_loader) {
-        ds.append(batch.data, batch.target);
-        iters++;
-        if (iters == 5)
-            break;
-        auto a = ds.get(2);
-        // if (a.second.numel()) {
-        //     std::cout << a.first << " " << a.second << std::endl;
-        // }
-    }
-    // auto ds1 = data::Dataset(ds.data(), ds.targets()).map(torch::data::transforms::Stack<>());
-    auto ds1 = torch::data::datasets::map(ds, torch::data::transforms::Stack<>());
-    auto dl = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(std::move(ds1), 128);
+    ds.to(dev);
+    ds.drop_to_max_size(30000);
 
-    for (auto& batch : *dl) {
-        auto d = batch;
-        std::cout << d.target.sizes() << std::endl;
-    }
+    std::cout << ds.get(torch::arange(3)).data.sizes() << std::endl;
+    std::cout << ds.get(torch::arange(3)).target.sizes() << std::endl;
+    data::Dataloader dl(ds, 64);
+    std::cout << dl.batches() << std::endl;
+    for (auto i : dl)
+        std::cout << i.data.sizes() << std::endl;
 
     return 0;
 }

@@ -1,13 +1,17 @@
 #pragma once
 
 #include <boost/optional.hpp>
-#include <random>
 #include <torch/torch.h>
 
 namespace data {
 
-    class Dataset {
+    struct Batch {
+        torch::Tensor data;
+        torch::Tensor target;
+        Batch(torch::Tensor data_, torch::Tensor target_) : data(data_), target(target_) {}
+    };
 
+    class Dataset {
     public:
         Dataset() = default;
 
@@ -23,19 +27,19 @@ namespace data {
             }
         }
 
-        Dataset(const std::string& fp)
+        Dataset(const std::string& fp_data, const std::string& fp_target = "")
         {
-            torch::load(_data, fp);
+            torch::load(_data, fp_data);
             _data = _data.toType(torch::kFloat32);
             _data_size = std::vector<int64_t>(_data.sizes().begin(), _data.sizes().end());
             _numel = std::accumulate(std::begin(_data_size), std::end(_data_size), 1.0, std::multiplies<int>());
-        }
 
-        struct Batch {
-            torch::Tensor data;
-            torch::Tensor target;
-            Batch(torch::Tensor data_, torch::Tensor target_) : data(data_), target(target_) {}
-        };
+            if (!(fp_target == "")) {
+                torch::load(_targets, fp_target);
+                _targets = _targets.toType(torch::kFloat32);
+                _has_targets = true;
+            }
+        }
 
         Batch get(size_t index)
         {
@@ -51,13 +55,6 @@ namespace data {
         {
             torch::Tensor tensor_idx = torch::from_blob(index.data(), {static_cast<int>(index.size())}, torch::TensorOptions().dtype(torch::kInt32)).to(torch::kInt64);
             return Batch(_data.index({tensor_idx}).clone(), (_targets.numel() == 0) ? torch::Tensor() : _targets.index({tensor_idx}).clone());
-        }
-
-        void shuffle()
-        {
-            torch::Tensor random_ordered_indexes = torch::randperm(_data.size(0));
-            _data = _data.index({random_ordered_indexes});
-            _targets = _has_targets ? _targets.index({random_ordered_indexes}) : _targets;
         }
 
         void flatten()
@@ -172,7 +169,7 @@ namespace data {
         }
 
         const std::vector<int64_t>& sizes() const { return _data_size; }
-        torch::optional<size_t> size() const { return _data.size(0); }
+        int size() const { return _data.size(0); }
         torch::Tensor data() { return _data.clone(); }
         torch::Tensor targets() { return _targets.clone(); }
         int numel() { return _numel; }
