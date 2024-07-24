@@ -1,5 +1,6 @@
 #pragma once
 
+// clang-format off
 #include <algorithm>
 #include <boost/optional.hpp>
 #include <cassert>
@@ -8,8 +9,11 @@
 #include <vector>
 #include "utils.hpp"
 #include "anymodulelist.hpp"
-#include "autoencoder.hpp"
+#include "modules.hpp"
 #include "conv_block.hpp"
 #include "mlp_block.hpp"
 #include "quantizer.hpp"
+#include "autoencoder.hpp"
+#include "model_wrapper.hpp"
 #include "trainer.hpp"
+// clang-format on

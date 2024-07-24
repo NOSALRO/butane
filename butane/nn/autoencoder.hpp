@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../data/dataloader.hpp"
 #include "nn.hpp"
 
 namespace nn {
@@ -7,8 +8,8 @@ namespace nn {
     public:
         AEImpl(torch::nn::Sequential encoder, torch::nn::Sequential decoder) : _enc(std::move(encoder)), _dec(std::move(decoder))
         {
-            register_module("Enc", _enc);
-            register_module("Dec", _dec);
+            register_module("Encoder", _enc);
+            register_module("Decoder", _dec);
         }
 
         torch::Tensor forward(torch::Tensor x)
@@ -28,6 +29,40 @@ namespace nn {
             return _dec->forward(x);
         }
 
+        static torch::Tensor loss_fn(torch::Tensor x_hat, torch::Tensor x)
+        {
+            return torch::nn::functional::mse_loss(x_hat, x);
+        }
+
+        template <typename F, typename Scheduler = torch::optim::LRScheduler>
+        void step(
+            data::Dataloader& dl,
+            std::shared_ptr<torch::optim::Optimizer> optimizer,
+            F loss_fn_,
+            boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
+        {
+            float sum_loss = 0.f;
+            int n_batches = dl.batches();
+
+            for (auto batch : dl) {
+                this->is_training() ? optimizer->zero_grad() : noop;
+                torch::Tensor x_reconstructed = this->forward(batch.data);
+                torch::Tensor loss = loss_fn_(x_reconstructed, batch.data);
+                if (this->is_training()) {
+                    loss.backward();
+                    optimizer->step();
+                }
+
+                sum_loss += loss.item<float>();
+            }
+
+            if (this->is_training() && scheduler)
+                scheduler.value()->step();
+
+            float avg_loss = sum_loss / n_batches;
+            std::cout << "Loss: " << avg_loss << std::endl;
+        }
+
     private:
         torch::nn::Sequential _enc, _dec;
     };
@@ -39,9 +74,9 @@ namespace nn {
     public:
         VQVAEImpl(torch::nn::Sequential encoder, torch::nn::Sequential decoder, Quantizer quantizer) : _enc(std::move(encoder)), _dec(std::move(decoder)), _quantizer(std::move(quantizer))
         {
-            register_module("Enc", _enc);
+            register_module("Encoder", _enc);
             register_module("Quantizer", _quantizer);
-            register_module("Dec", _dec);
+            register_module("Decoder", _dec);
         }
 
         std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
@@ -74,6 +109,50 @@ namespace nn {
             return _dec->forward(x);
         }
 
+        static std::tuple<torch::Tensor, torch::Tensor> loss_fn(torch::Tensor x_hat, torch::Tensor x, torch::Tensor vq_loss)
+        {
+            torch::Tensor loss, x_rec;
+            x_rec = torch::nn::functional::mse_loss(x_hat, x);
+            loss = x_rec + vq_loss;
+            return {loss, x_rec};
+        }
+
+        template <typename F, typename Scheduler = torch::optim::LRScheduler>
+        void step(
+            data::Dataloader& dl,
+            std::shared_ptr<torch::optim::Optimizer> optimizer,
+            F loss_fn_,
+            boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
+        {
+            float sum_loss = 0.f;
+            float sum_quantization_loss = 0.f;
+            float sum_loss_rec = 0.f;
+            int n_batches = dl.batches();
+
+            for (auto batch : dl) {
+                this->is_training() ? optimizer->zero_grad() : noop;
+                torch::Tensor x_reconstructed, quantization_loss;
+                std::tie(x_reconstructed, quantization_loss) = this->forward(batch.data);
+                torch::Tensor loss, loss_rec;
+                std::tie(loss, loss_rec) = loss_fn_(x_reconstructed, batch.data, quantization_loss);
+                if (this->is_training()) {
+                    loss.backward();
+                    optimizer->step();
+                }
+
+                sum_loss += loss.item<float>();
+                sum_quantization_loss += torch::Tensor(quantization_loss).item<float>();
+                sum_loss_rec += loss_rec.item<float>();
+            }
+
+            if (this->is_training() && scheduler)
+                scheduler.value()->step();
+
+            float avg_loss = sum_loss / n_batches;
+            float avg_quantization_loss = sum_quantization_loss / n_batches;
+            float avg_loss_rec = sum_loss_rec / n_batches;
+            std::cout << "Loss: " << avg_loss << " Reconstruction Loss: " << avg_loss_rec << " Quantization Loss: " << avg_quantization_loss << std::endl;
+        }
 
     private:
         torch::nn::Sequential _enc, _dec;
@@ -87,9 +166,9 @@ namespace nn {
     public:
         MLVQVAEImpl(torch::nn::Sequential encoder, torch::nn::Sequential decoder, Quantizer quantizer) : _enc(std::move(encoder)), _dec(std::move(decoder)), _quantizer(std::move(quantizer))
         {
-            register_module("Enc", _enc);
+            register_module("Encoder", _enc);
             register_module("Quantizer", _quantizer);
-            register_module("Dec", _dec);
+            register_module("Decoder", _dec);
         }
 
         std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(torch::Tensor x)
@@ -124,7 +203,7 @@ namespace nn {
             return _dec->forward(x);
         }
 
-        std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> loss_fn(torch::Tensor x_hat, torch::Tensor x_quantized_hat, torch::Tensor x, torch::Tensor vq_loss)
+        static std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> loss_fn(torch::Tensor x_hat, torch::Tensor x_quantized_hat, torch::Tensor x, torch::Tensor vq_loss)
         {
             torch::Tensor loss, x_rec, x_rec_quantized;
             x_rec = torch::nn::functional::mse_loss(x_hat, x);
@@ -133,42 +212,45 @@ namespace nn {
             return {loss, x_rec, x_rec_quantized};
         }
 
-        void step(std::shared_ptr<torch::optim::Optimizer> optimizer, boost::optional<std::shared_ptr<torch::optim::LRScheduler>> scheduler = boost::none)
+        template <typename F, typename Scheduler = torch::optim::LRScheduler>
+        void step(
+            data::Dataloader& dl,
+            std::shared_ptr<torch::optim::Optimizer> optimizer,
+            F loss_fn_,
+            boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
         {
-            int batch_size = 64;
             float sum_loss = 0.f;
             float sum_quantization_loss = 0.f;
             float sum_loss_ae = 0.f;
             float sum_loss_vq = 0.f;
-            // int num_batches = std::ceil(dataset.size()[0] / batch_size);
-            int num_batches = 4;
-            float denom = num_batches + 1.f;
+            int n_batches = dl.batches();
 
-            // dataset.reset_idx();
-
-            for (int i = 0; i < num_batches; ++i) {
-                optimizer->zero_grad();
-                // torch::Tensor batch = dataset.sample(batch_size, false);
-                torch::Tensor batch = torch::rand({64, 1, 28, 28}).to(torch::Device(torch::kCUDA));
+            for (auto batch : dl) {
+                this->is_training() ? optimizer->zero_grad() : noop;
                 torch::Tensor x_reconstructed, x_quantized_reconstructed, quantization_loss;
-                std::tie(x_reconstructed, x_quantized_reconstructed, quantization_loss) = this->forward(batch);
+                std::tie(x_reconstructed, x_quantized_reconstructed, quantization_loss) = this->forward(batch.data);
                 torch::Tensor loss, loss_ae, loss_vq;
-                std::tie(loss, loss_ae, loss_vq) = loss_fn(x_reconstructed, x_quantized_reconstructed, batch, quantization_loss);
-                loss.backward();
-                optimizer->step();
+                std::tie(loss, loss_ae, loss_vq) = loss_fn_(x_reconstructed, x_quantized_reconstructed, batch.data, quantization_loss);
+
+                if (this->is_training()) {
+                    loss.backward();
+                    optimizer->step();
+                }
 
                 sum_loss += loss.item<float>();
                 sum_quantization_loss += torch::Tensor(quantization_loss).item<float>();
-                sum_loss_ae += (loss_ae * batch_size).item<float>();
+                sum_loss_ae += loss_ae.item<float>();
                 sum_loss_vq += loss_vq.item<float>();
             }
-            // if (_scheduler)
-            //     _scheduler.value().step();
-            float avg_loss = sum_loss / denom;
-            float avg_quantization_loss = sum_quantization_loss / denom;
-            float avg_loss_ae = sum_loss_ae / denom;
-            float avg_loss_vq = sum_loss_vq / denom;
-            std::cout << "Epoch: " << (1) << " Loss: " << avg_loss << " Reconstruction Loss: " << avg_loss_ae << " Reconstruction Quant Loss: " << avg_loss_vq << " Quantization Loss: " << avg_quantization_loss << std::endl;
+
+            if (this->is_training() && scheduler)
+                scheduler.value()->step();
+
+            float avg_loss = sum_loss / n_batches;
+            float avg_quantization_loss = sum_quantization_loss / n_batches;
+            float avg_loss_ae = sum_loss_ae / n_batches;
+            float avg_loss_vq = sum_loss_vq / n_batches;
+            std::cout << "Loss: " << avg_loss << " Reconstruction Loss: " << avg_loss_ae << " Reconstruction Quant Loss: " << avg_loss_vq << " Quantization Loss: " << avg_quantization_loss << std::endl;
         }
 
     private:
