@@ -1,6 +1,6 @@
 #include "butane/butane.h"
 
-using namespace nn;
+using namespace butane::nn;
 
 
 int main(int argc, char** argv)

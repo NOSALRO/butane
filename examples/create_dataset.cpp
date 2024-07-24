@@ -6,7 +6,7 @@ int main(int argc, char** argv)
 {
     torch::Device dev(torch::kCUDA);
 
-    data::Dataset ds("data/mnist_data.pt", "data/mnist_targets.pt");
+    butane::data::Dataset ds("data/mnist_data.pt", "data/mnist_targets.pt");
     std::cout << ds.data().sizes()  << " " << ds.targets().sizes() << std::endl;
 
     ds.to(dev);
@@ -15,7 +15,7 @@ int main(int argc, char** argv)
 
     std::cout << ds.get(torch::arange(3)).data.sizes() << std::endl;
     std::cout << ds.get(torch::arange(3)).target.sizes() << std::endl;
-    data::Dataloader dl(ds, 64);
+    butane::data::Dataloader dl(ds, 64);
     std::cout << dl.batches() << std::endl;
     for (auto i : dl)
         std::cout << i.data.sizes() << std::endl;

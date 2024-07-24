@@ -1,6 +1,6 @@
 #include "butane/butane.h"
 
-using namespace nn;
+using namespace butane::nn;
 
 int main(int argc, char** argv)
 {
@@ -40,9 +40,9 @@ int main(int argc, char** argv)
     // AE model(encoder, decoder);
     model->to(dev);
 
-    data::Dataset ds("data/mnist_data.pt", "data/mnist_targets.pt");
+    butane::data::Dataset ds("data/mnist_data.pt", "data/mnist_targets.pt");
     ds.to(dev);
-    data::Dataloader dl(ds, 64);
+    butane::data::Dataloader dl(ds, 64);
 
     std::shared_ptr<torch::optim::Adam> optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
     ModelTrainer trainer(model, dl, optimizer);
