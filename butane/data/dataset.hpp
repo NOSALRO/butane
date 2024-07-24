@@ -36,7 +36,6 @@ namespace data {
 
             if (!(fp_target == "")) {
                 torch::load(_targets, fp_target);
-                _targets = _targets.toType(torch::kFloat32);
                 _has_targets = true;
             }
         }

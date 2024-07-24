@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/torch.h>
+#include "dataset.hpp"
 
 namespace data {
 
@@ -37,6 +38,8 @@ namespace data {
         DataloaderIterator end() { return {_dataset, _indices.end()}; }
 
         size_t batches() { return _indices.size(); }
+
+        const Dataset& dataset() const { return _dataset; }
 
     private:
         void _shuffle_and_split()
