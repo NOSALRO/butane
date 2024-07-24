@@ -26,7 +26,7 @@ def options(opt):
     opt.load('boost')
     opt.load("torch")
     opt.load("eigen")
-    opt.load("misc")
+    # opt.load("misc")
     opt.add_option("--tests", action="store_true", help="Compile Tests", dest="tests")
 
 
@@ -45,7 +45,8 @@ def configure(conf):
     conf.check_boost(required=True)
     conf.check_torch(required=True)
     conf.check_eigen(required=True)
-    conf.check_misc(required=False)
+    # conf.check_misc(required=False)
+    conf.recurse('submodules/kmeans-torch-cpp/')
 
     conf.check(features="cxx cxxprogram", lib=["pthread"], uselib_store="PTHREAD")
 
@@ -69,11 +70,14 @@ def configure(conf):
 
     all_flags = common_flags + opt_flags + ""
     conf.env["CXXFLAGS"] = conf.env["CXXFLAGS"] + all_flags.split()
+    conf.env.append_value('CPPFLAGS', ["-I"+conf.path.abspath() + "/submodules/kmeans-torch-cpp/src/"])
+    conf.env.append_value('INCLUDES', [conf.path.abspath() + "/submodules/kmeans-torch-cpp/src/"])
     print(conf.env["CXXFLAGS"])
 
 
 def build(bld):
     # compilation of experiment
+    bld.recurse('submodules/kmeans-torch-cpp/')
     libs = "TORCH EIGEN BOOST TORCH_KMEANS"
 
     examples = []
@@ -88,8 +92,9 @@ def build(bld):
             features="cxx",
             install_path=None,
             source=[example],
-            includes="./",
+            includes=["./butane/", "submodules/kmeans-torch-cpp/src/kmeans/"],
             uselib=libs,
+            use="torch_kmeans",
             # target="/".join(experiment.split("/")[2:]).split(".")[0],
             target=example.split("/")[-1].split('.')[0]
         )
