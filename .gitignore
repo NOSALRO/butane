@@ -7,4 +7,4 @@
 .clang*
 viz.py
 *.tmp
-*__pycache
+*__pycache__

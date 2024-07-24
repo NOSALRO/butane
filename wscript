@@ -26,6 +26,7 @@ def options(opt):
     opt.load("boost")
     opt.load("torch")
     opt.load("eigen")
+    opt.add_option("--examples", default=False, dest='build_examples', action='store_true')
 
 
 def configure(conf):
@@ -78,16 +79,17 @@ def build(bld):
             if f.endswith("cpp"):
                 examples.append(f"{root}{f}".replace(path_prefix, ''))
 
-    for example in examples:
-        bld.program(
-            features="cxx",
-            install_path=None,
-            source=[example],
-            includes=export_includes,
-            uselib=libs,
-            use="torch_kmeans",
-            target=example.split("/")[-1].split(".")[0],
-        )
+    if bld.options.build_examples:
+        for example in examples:
+            bld.program(
+                features="cxx",
+                install_path=None,
+                source=[example],
+                includes=export_includes,
+                uselib=libs,
+                use="torch_kmeans",
+                target=example.split("/")[-1].split(".")[0],
+            )
 
     install_files = []
     for root, dirs, files in os.walk(APPNAME):
