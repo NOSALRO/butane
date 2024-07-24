@@ -12,8 +12,8 @@ sys.path.insert(0, sys.path[0] + "/waf_tools")
 VERSION = "1.0.0"
 APPNAME = "butane"
 
-srcdir = "."
-blddir = "build"
+srcdir = os.path.abspath("butane/")
+blddir = os.path.abspath("build/")
 
 from waflib.Build import BuildContext
 from waflib import Logs
@@ -23,32 +23,24 @@ from waflib.Tools import waf_unit_test
 def options(opt):
     opt.load("compiler_cxx")
     opt.load("compiler_c")
-    opt.load('boost')
+    opt.load("boost")
     opt.load("torch")
     opt.load("eigen")
-    # opt.load("misc")
-    opt.add_option("--tests", action="store_true", help="Compile Tests", dest="tests")
 
 
 def configure(conf):
 
-    conf.get_env()["BUILD_GRAPHIC"] = False
-
     conf.load("compiler_cxx")
     conf.load("compiler_c")
-    conf.load('boost')
+    conf.load("boost")
     conf.load("torch")
     conf.load("eigen")
 
     # we need pthread for video saving
-    # conf.check(features='cxx cxxprogram', lib=['pthread'], uselib_store='PTHREAD')
     conf.check_boost(required=True)
     conf.check_torch(required=True)
     conf.check_eigen(required=True)
-    # conf.check_misc(required=False)
-    conf.recurse('submodules/kmeans-torch-cpp/')
-
-    conf.check(features="cxx cxxprogram", lib=["pthread"], uselib_store="PTHREAD")
+    conf.recurse("./submodules/kmeans-torch-cpp/")
 
     # We require C++17
     if conf.env.CXX_NAME in ["icc", "icpc"]:
@@ -70,41 +62,39 @@ def configure(conf):
 
     all_flags = common_flags + opt_flags + ""
     conf.env["CXXFLAGS"] = conf.env["CXXFLAGS"] + all_flags.split()
-    conf.env.append_value('CPPFLAGS', ["-I"+conf.path.abspath() + "/submodules/kmeans-torch-cpp/src/"])
-    conf.env.append_value('INCLUDES', [conf.path.abspath() + "/submodules/kmeans-torch-cpp/src/"])
-    print(conf.env["CXXFLAGS"])
 
 
 def build(bld):
     # compilation of experiment
-    bld.recurse('submodules/kmeans-torch-cpp/')
-    libs = "TORCH EIGEN BOOST TORCH_KMEANS"
+    bld.recurse("./submodules/kmeans-torch-cpp/")
+    libs = "TORCH EIGEN BOOST"
+    path_prefix = bld.path.abspath() + '/'
 
     examples = []
+    export_includes = ["./butane"]
 
-    for root, dirs, files in os.walk("./examples/"):
+    for root, dirs, files in os.walk(bld.path.abspath() + "/examples/"):
         for f in files:
             if f.endswith("cpp"):
-                examples.append(f"{root}/{f}")
+                examples.append(f"{root}{f}".replace(path_prefix, ''))
 
     for example in examples:
         bld.program(
             features="cxx",
             install_path=None,
             source=[example],
-            includes=["./butane/", "submodules/kmeans-torch-cpp/src/kmeans/"],
+            includes=export_includes,
             uselib=libs,
             use="torch_kmeans",
-            # target="/".join(experiment.split("/")[2:]).split(".")[0],
-            target=example.split("/")[-1].split('.')[0]
+            target=example.split("/")[-1].split(".")[0],
         )
 
     install_files = []
     for root, dirs, files in os.walk(APPNAME):
         for f in files:
             if f.endswith(".hpp") or f.endswith(".h"):
-                install_files.append(f'{root}/{f}')
+                install_files.append(f"{root}/{f}")
 
     for f in install_files:
-        dir_name = '/'.join(f.split('/')[:-1])
-        bld.install_files('${PREFIX}/include/' + dir_name, f)
+        dir_name = "/".join(f.split("/")[:-1])
+        bld.install_files("${PREFIX}/include/" + dir_name, f)

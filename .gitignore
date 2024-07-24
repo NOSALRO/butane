@@ -7,3 +7,4 @@
 .clang*
 viz.py
 *.tmp
+*__pycache
