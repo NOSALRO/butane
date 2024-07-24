@@ -10,6 +10,7 @@ int main(int argc, char** argv)
     std::cout << ds.data().sizes()  << " " << ds.targets().sizes() << std::endl;
 
     ds.to(dev);
+    ds.sparsify();
     ds.drop_to_max_size(30000);
 
     std::cout << ds.get(torch::arange(3)).data.sizes() << std::endl;

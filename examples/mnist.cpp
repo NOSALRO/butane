@@ -17,49 +17,22 @@ int main(int argc, char** argv)
 
     MLPBlock mlp(c->output_size().prod().item<int>(), 10, std::vector<int64_t>{64, 64}, AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::LogSoftmax(-1)}, true);
 
-    torch::nn::Sequential model(c, functional::flatten(1), mlp);
+    SimpleClassifier model(torch::nn::Sequential{c, functional::flatten(1), mlp});
     model->to(dev);
     std::cout << model << std::endl;
 
-    auto train_dataset = torch::data::datasets::MNIST("./data/")
-                             .map(torch::data::transforms::Stack<>());
+    data::Dataset ds("data/mnist_data.pt", "data/mnist_targets.pt");
+    data::Dataset test_ds("data/mnist_test_data.pt", "data/mnist_test_targets.pt");
+    ds.to(dev);
+    test_ds.to(dev);
+    data::Dataloader dl(ds, 64);
+    data::Dataloader test_dl(ds, 64, false);
 
-    auto data_loader = torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(std::move(train_dataset), 128);
-
-    auto test_dataset = torch::data::datasets::MNIST("./data/", torch::data::datasets::MNIST::Mode::kTest)
-                            .map(torch::data::transforms::Stack<>());
-    auto test_loader = torch::data::make_data_loader(std::move(test_dataset), 64);
-
-    torch::optim::Adam optimizer(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
-
-    for (int i = 0; i < 100; i++) {
-        torch::Tensor sum_loss = torch::tensor(0.);
-        int j = 0;
-        for (auto& batch : *data_loader) {
-            optimizer.zero_grad();
-            auto data = batch.data.to(dev);
-            auto label = batch.target.to(dev);
-            // auto label = torch::zeros({16, 10}).scatter_(1, batch.target.unsqueeze(1), 1.0);
-            torch::Tensor out = model->forward(data);
-            torch::Tensor loss = torch::nn::functional::nll_loss(out, label);
-            loss.backward();
-            optimizer.step();
-            sum_loss += loss.cpu();
-            j += 1;
-        }
-        std::cout << "LOSS: " << sum_loss.item<double>() / j << std::endl;
-        model->eval();
-        int total_correct = 0;
-        int total_samples = 0;
-        for (auto& batch : *test_loader) {
-            torch::Tensor out = model->forward(batch.data.to(dev));
-            auto prediction = out.argmax(1).cpu();
-            total_correct += prediction.eq(batch.target).sum().item<int>();
-            total_samples += batch.target.size(0);
-        }
-        std::cout << "ACCURACY: -> " << static_cast<float>(total_correct) / total_samples << std::endl;
-        model->train();
-    }
+    std::shared_ptr<torch::optim::Adam> optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
+    std::shared_ptr<optim::CyclicLR> scheduler = std::make_shared<optim::CyclicLR>(*optimizer, 1e-04, 1e-03, 2000);
+    ModelTrainer<SimpleClassifier, optim::CyclicLR> trainer(model, dl, optimizer, scheduler);
+    trainer(10, model->loss_fn, 3, test_dl);
+    trainer.eval(test_dl, model->loss_fn);
 
     return 0;
 }

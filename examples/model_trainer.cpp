@@ -33,14 +33,20 @@ int main(int argc, char** argv)
 
     ConvTranspose2dBlock<torch::nn::BatchNorm2d, torch::nn::MaxPool2d> c_dec(co_dec);
 
-
     torch::nn::Sequential encoder(c_enc, functional::flatten(1), mlp_enc);
     torch::nn::Sequential decoder(mlp_dec, functional::unflatten(1, c_enc->output_size()), c_dec);
     MLVQVAE<Quantizer> model(encoder, decoder, quantizer);
+    // VQVAE<Quantizer> model(encoder, decoder, quantizer);
+    // AE model(encoder, decoder);
     model->to(dev);
+
+    data::Dataset ds("data/mnist_data.pt", "data/mnist_targets.pt");
+    ds.to(dev);
+    data::Dataloader dl(ds, 64);
+
     std::shared_ptr<torch::optim::Adam> optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
-    ModelTrainer trainer(model, optimizer);
-    trainer(100);
+    ModelTrainer trainer(model, dl, optimizer);
+    trainer(100, model->loss_fn);
 
     return 0;
 }
