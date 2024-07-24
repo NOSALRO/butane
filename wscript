@@ -93,3 +93,13 @@ def build(bld):
             # target="/".join(experiment.split("/")[2:]).split(".")[0],
             target=example.split("/")[-1].split('.')[0]
         )
+
+    install_files = []
+    for root, dirs, files in os.walk(APPNAME):
+        for f in files:
+            if f.endswith(".hpp") or f.endswith(".h"):
+                install_files.append(f'{root}/{f}')
+
+    for f in install_files:
+        dir_name = '/'.join(f.split('/')[:-1])
+        bld.install_files('${PREFIX}/include/' + dir_name, f)
