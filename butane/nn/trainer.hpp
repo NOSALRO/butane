@@ -14,7 +14,7 @@ namespace butane {
                 data::Dataloader& dl,
                 std::shared_ptr<torch::optim::Optimizer> optimizer,
                 boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
-                : _model(model), _dl(dl), _optimizer(std::move(optimizer)), _scheduler(std::move(scheduler)) {}
+                : _model(model), _dl(dl), _optimizer(optimizer), _scheduler(scheduler) {}
 
             template <typename F>
             void operator()(unsigned int epochs, F loss, int eval_period = 0, boost::optional<data::Dataloader&> eval_dl = boost::none)

@@ -62,7 +62,8 @@ def configure(conf):
                 opt_flags = opt_flags + " -faligned-new"
 
     all_flags = common_flags + opt_flags + ""
-    conf.env["CXXFLAGS"] = conf.env["CXXFLAGS"] + all_flags.split()
+    conf.env["CXXFLAGS"] = all_flags.split()
+    print(conf.env["CXXFLAGS"])
 
 
 def build(bld):
@@ -72,7 +73,7 @@ def build(bld):
     path_prefix = bld.path.abspath() + '/'
 
     examples = []
-    export_includes = ["./butane"]
+    export_includes = ["./"]
 
     for root, dirs, files in os.walk(bld.path.abspath() + "/examples/"):
         for f in files:

@@ -47,12 +47,17 @@ int main(int argc, char** argv)
     butane::data::Dataloader dl(ds, 64);
     butane::data::Dataloader test_dl(ds, 64, false);
 
-    std::shared_ptr<torch::optim::Adam> optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
-    std::shared_ptr<butane::optim::CyclicLR> scheduler = std::make_shared<butane::optim::CyclicLR>(*optimizer, 1e-04, 1e-03, 2000);
+    for (auto batch : dl) {
+        batch.data *= 0;
+    }
+    std::cout << ds.data().mean() << std::endl;
 
-    butane::nn::ModelTrainer trainer(model, dl, optimizer);
-    trainer(10, model->loss_fn, 3, test_dl);
-    trainer.eval(test_dl, model->loss_fn);
+    // std::shared_ptr<torch::optim::Adam> optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
+    // std::shared_ptr<butane::optim::CyclicLR> scheduler = std::make_shared<butane::optim::CyclicLR>(*optimizer, 1e-04, 1e-03, 2000);
+
+    // butane::nn::ModelTrainer trainer(model, dl, optimizer);
+    // trainer(10, model->loss_fn, 3, test_dl);
+    // trainer.eval(test_dl, model->loss_fn);
 
     return 0;
 }

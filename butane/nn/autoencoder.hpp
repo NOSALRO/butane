@@ -7,7 +7,7 @@ namespace butane {
     namespace nn {
         class AEImpl : public torch::nn::Module {
         public:
-            AEImpl(torch::nn::Sequential encoder, torch::nn::Sequential decoder) : _enc(std::move(encoder)), _dec(std::move(decoder))
+            AEImpl(torch::nn::Sequential& encoder, torch::nn::Sequential& decoder) : _enc(encoder), _dec(decoder)
             {
                 register_module("Encoder", _enc);
                 register_module("Decoder", _dec);
@@ -73,7 +73,8 @@ namespace butane {
         template <typename Quantizer>
         class VQVAEImpl : public torch::nn::Module {
         public:
-            VQVAEImpl(torch::nn::Sequential encoder, torch::nn::Sequential decoder, Quantizer quantizer) : _enc(std::move(encoder)), _dec(std::move(decoder)), _quantizer(std::move(quantizer))
+            VQVAEImpl(torch::nn::Sequential encoder, torch::nn::Sequential decoder, Quantizer quantizer)
+                : _enc(encoder), _dec(decoder), _quantizer(quantizer)
             {
                 register_module("Encoder", _enc);
                 register_module("Quantizer", _quantizer);
@@ -165,7 +166,7 @@ namespace butane {
         template <typename Quantizer>
         class MLVQVAEImpl : public torch::nn::Module {
         public:
-            MLVQVAEImpl(torch::nn::Sequential encoder, torch::nn::Sequential decoder, Quantizer quantizer) : _enc(std::move(encoder)), _dec(std::move(decoder)), _quantizer(std::move(quantizer))
+            MLVQVAEImpl(torch::nn::Sequential& encoder, torch::nn::Sequential& decoder, Quantizer& quantizer) : _enc(encoder), _dec(decoder), _quantizer(quantizer)
             {
                 register_module("Encoder", _enc);
                 register_module("Quantizer", _quantizer);
@@ -255,8 +256,8 @@ namespace butane {
             }
 
         private:
-            torch::nn::Sequential _enc, _dec;
-            Quantizer _quantizer;
+            torch::nn::Sequential& _enc, _dec;
+            Quantizer& _quantizer;
         };
         TORCH_MODULE_TEMPLATED(MLVQVAE);
     } // namespace nn

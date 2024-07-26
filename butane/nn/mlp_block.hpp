@@ -21,14 +21,17 @@ namespace butane {
                 _hidden_dims.insert(_hidden_dims.end(), _output_dims);
                 size_t n_layers = _hidden_dims.size() - 1;
 
-                assert((activation_function.size() == n_layers || activation_function.size() == 1) && "Activation Functions size should be 1 or N layers");
+                assert((activation_function.size() == n_layers || activation_function.size() == 1 || (activation_function.size() == n_layers - 1 && !output_activation)) && "Activation Functions size should be 1 or N layers");
                 assert((dropout.size() == n_layers || dropout.size() == 1) && "Dropout size should be 1 or N layers");
 
                 utils::_fill_defaults(activation_function, n_layers);
                 utils::_fill_defaults(dropout, n_layers);
 
                 if (!output_activation) {
-                    activation_function.set(activation_function.size() - 1, torch::nn::Identity());
+                    if (activation_function.size() == n_layers - 1)
+                        activation_function.push_back(torch::nn::Identity());
+                    else
+                        activation_function.set(activation_function.size() - 1, torch::nn::Identity());
                 }
 
                 for (unsigned int i = 0; i < _hidden_dims.size() - 1; ++i) {
