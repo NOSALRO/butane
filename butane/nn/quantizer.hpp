@@ -15,7 +15,7 @@ namespace butane {
                 torch::Device device = torch::Device(torch::kCPU)) : _latent_dim(latent_dim), _n_centers(n_centers), _device(device)
             {
                 embedding = torch::nn::Embedding(_n_centers, _latent_dim);
-                embedding->weight.data().uniform_(-1 / _n_centers, 1 / _n_centers);
+                embedding->weight.data().uniform_(-1. / static_cast<double>(_n_centers), 1. /static_cast<double>(_n_centers));
                 embedding->weight.set_requires_grad(true);
                 embedding = register_module("embeddings", embedding);
             }
@@ -43,13 +43,13 @@ namespace butane {
 
             void init_codebook(double low, double high)
             {
-                embedding->weight.data().uniform_(low, high);
+                embedding->weight.data().uniform_(static_cast<double>(low), static_cast<double>(high));
                 embedding->weight.set_requires_grad(true);
             }
 
             void init_codebook_kmeans(double low, double high)
             {
-                torch::Tensor rdata = torch::empty({_n_centers * 400, _latent_dim}).uniform_(low, high);
+                torch::Tensor rdata = torch::empty({_n_centers * 400, _latent_dim}).uniform_(static_cast<double>(low), static_cast<double>(high));
                 rdata = rdata.to(_device);
                 torch_kmeans::Kmeans kmeans(_n_centers, "kmeans++", 1e-18, -1);
                 kmeans.fit(rdata);
