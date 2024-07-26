@@ -61,7 +61,7 @@ def configure(conf):
             if gcc_version >= 71:
                 opt_flags = opt_flags + " -faligned-new"
 
-    all_flags = common_flags + opt_flags + ""
+    all_flags = common_flags + opt_flags + " -D_GLIBCXX_USE_CXX11_ABI=1"
     conf.env["CXXFLAGS"] = all_flags.split()
     print(conf.env["CXXFLAGS"])
 

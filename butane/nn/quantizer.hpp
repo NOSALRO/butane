@@ -1,7 +1,7 @@
 #pragma once
 
 #include "nn.hpp"
-#include <torch_kmeans/kmeans.hpp>
+#include "../../submodules/kmeans-torch-cpp/src/kmeans/kmeans.hpp"
 
 namespace butane {
     namespace nn {
