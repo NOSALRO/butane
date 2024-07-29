@@ -32,6 +32,8 @@ namespace butane {
                 bvec normalization = bvec{false};
             };
 
+            ConvNdBlockImpl() = default;
+
             ConvNdBlockImpl(const Config& conf)
             {
                 *this = ConvNdBlockImpl(
@@ -213,6 +215,8 @@ namespace butane {
                 bool output_activation = true;
                 bvec normalization = bvec{false};
             };
+
+            ConvTransposeNdBlockImpl() = default;
 
             ConvTransposeNdBlockImpl(const Config& conf)
             {

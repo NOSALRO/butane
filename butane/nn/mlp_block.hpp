@@ -9,6 +9,8 @@ namespace butane {
             using ivec = dtypes::ivec;
             using dvec = dtypes::dvec;
 
+            MLPBlockImpl() = default;
+
             MLPBlockImpl(
                 int input_dims,
                 int output_dims,
