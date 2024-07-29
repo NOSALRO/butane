@@ -36,29 +36,26 @@ def check_torch(conf, *k, **kw):
         includes_check = ['/usr/local/include', '/usr/include', '/usr/include/torch/csrc/api/include', '/usr/local/include/torch/csrc/api/include', '/opt/libtorch/include', '/opt/libtorch/include/torch/csrc/api/include']
         libs_check = ['/usr/local/lib', '/usr/local/lib64', '/usr/lib', '/usr/lib64', '/usr/lib/x86_64-linux-gnu/', '/opt/libtorch/lib/']
 
-    # libtorch requires Caffe2
-    # Caffe2 requires phtread, gflags, glog, protobuf, mkl, and mkldnn (for CPU version)
-
-    # caffe2_major = -1
-    # caffe2_minor = -1
-    # caffe2_patch = -1
-    caffe2_include = []
-    caffe2_libpath = []
-    caffe2_check = list(set(includes_check + ['/usr/local/include', '/usr/include', '/opt/intel/mkl/include']))
-    caffe2_lib_checks = list(set(libs_check + ['/usr/local/lib', '/opt/intel/mkl/lib', '/usr/local/lib64', '/usr/lib', '/usr/lib64', '/usr/lib/x86_64-linux-gnu/']))
-    caffe2_found = False
-    caffe2_libs = []
     try:
-        # caffe2_include = [get_directory('caffe2/core/macros.h', caffe2_check)]
+        # libtorch requires Caffe2
+        # Caffe2 requires phtread, gflags, glog, protobuf, mkl, and mkldnn (for CPU version)
+
+        # caffe2_major = -1
+        # caffe2_minor = -1
+        # caffe2_patch = -1
+        caffe2_include = []
+        caffe2_libpath = []
+        caffe2_check = list(set(includes_check + ['/usr/local/include', '/usr/include', '/opt/intel/mkl/include']))
+        caffe2_lib_checks = list(set(libs_check + ['/usr/local/lib', '/opt/intel/mkl/lib', '/usr/local/lib64', '/usr/lib', '/usr/lib64', '/usr/lib/x86_64-linux-gnu/']))
+        caffe2_found = False
+        caffe2_libs = []
         caffe2_include.append(get_directory('gflags/gflags.h', caffe2_check))
         caffe2_include.append(get_directory('glog/logging.h', caffe2_check))
         caffe2_include.append(get_directory('google/protobuf/service.h', caffe2_check))
-        # caffe2_include.append(get_directory('mkldnn.h', caffe2_check))
         caffe2_libpath = [get_directory('libgflags.' + suffix, caffe2_lib_checks)]
         caffe2_libpath.append(get_directory('libglog.' + suffix, caffe2_lib_checks))
         caffe2_libpath.append(get_directory('libprotobuf.' + suffix, caffe2_lib_checks))
-        caffe2_libpath.append(get_directory('libdnnl.' + suffix, caffe2_lib_checks))
-        caffe2_libpath.append('/usr/include/openapi/dnnl/')
+        caffe2_libpath.append(get_directory('libdnnl.a', caffe2_lib_checks))
 
         caffe2_libs = ['gflags', 'glog', 'protobuf', 'dnnl']
 

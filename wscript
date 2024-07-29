@@ -26,6 +26,7 @@ def options(opt):
     opt.load("boost")
     opt.load("torch")
     opt.load("eigen")
+    opt.load("torch_kmeans")
     opt.add_option("--examples", default=False, dest='build_examples', action='store_true')
 
 
@@ -36,11 +37,13 @@ def configure(conf):
     conf.load("boost")
     conf.load("torch")
     conf.load("eigen")
+    conf.load("torch_kmeans")
 
     # we need pthread for video saving
     conf.check_boost(required=True)
     conf.check_torch(required=True)
     conf.check_eigen(required=True)
+    conf.check_torch_kmeans(required=True)
     conf.recurse("./submodules/kmeans-torch-cpp/")
 
     # We require C++17
@@ -69,7 +72,7 @@ def configure(conf):
 def build(bld):
     # compilation of experiment
     bld.recurse("./submodules/kmeans-torch-cpp/")
-    libs = "TORCH EIGEN BOOST"
+    libs = "TORCH EIGEN BOOST TORCH_KMEANS"
     path_prefix = bld.path.abspath() + '/'
 
     examples = []
