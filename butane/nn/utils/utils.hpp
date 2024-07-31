@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nn.hpp"
+#include "../nn.hpp"
 
 #define noop (void)0
 

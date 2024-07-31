@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nn.hpp"
+#include "../nn.hpp"
 #include <kmeans/kmeans.hpp>
 
 namespace butane {

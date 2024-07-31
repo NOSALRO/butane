@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../data/dataloader.hpp"
-#include "nn.hpp"
+#include "../../data/dataloader.hpp"
+#include "../nn.hpp"
 
 namespace butane {
     namespace nn {
@@ -24,7 +24,7 @@ namespace butane {
                 data::Dataloader& dl,
                 std::shared_ptr<torch::optim::Optimizer> optimizer,
                 F loss_fn_,
-                boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
+                std::shared_ptr<Scheduler> scheduler = nullptr)
             {
                 float sum_loss = 0.f;
                 int64_t correct_preds = 0;

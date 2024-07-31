@@ -7,13 +7,13 @@
 #include <torch/torch.h>
 #include <utility>
 #include <vector>
-#include "utils.hpp"
+#include "utils/utils.hpp"
 #include "anymodulelist.hpp"
-#include "modules.hpp"
-#include "conv_block.hpp"
-#include "mlp_block.hpp"
-#include "quantizer.hpp"
-#include "autoencoder.hpp"
-#include "model_wrapper.hpp"
-#include "trainer.hpp"
+#include "modules/modules.hpp"
+#include "modules/conv_block.hpp"
+#include "modules/mlp_block.hpp"
+#include "modules/quantizer.hpp"
+#include "architectures/autoencoders.hpp"
+#include "utils/model_wrapper.hpp"
+#include "utils/trainer.hpp"
 // clang-format on

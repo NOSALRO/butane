@@ -1,19 +1,15 @@
-#include "nn.hpp"
+#pragma once
+
+#include "../nn.hpp"
 
 namespace butane {
     namespace nn {
-        class GaussianAFImpl : public torch::nn::Module {
-        public:
-            GaussianAFImpl() = default;
-
-            inline torch::Tensor forward(torch::Tensor x)
+        namespace functional {
+            inline torch::Tensor gaussian(torch::Tensor x)
             {
                 return (-x.square()).exp();
             }
-        };
-        TORCH_MODULE(GaussianAF);
 
-        namespace functional {
             inline torch::Tensor squashing(torch::Tensor x)
             {
                 return (9 / 8. * torch::sin(x)) + (1 / 8. * torch::sin(3. * x));
@@ -33,5 +29,27 @@ namespace butane {
                 return torch::nn::AnyModule(torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1)));
             }
         } // namespace functional
+
+        class GaussianImpl : public torch::nn::Module {
+        public:
+            GaussianImpl() = default;
+
+            inline torch::Tensor forward(torch::Tensor x)
+            {
+                return functional::gaussian(x);
+            }
+        };
+        TORCH_MODULE(Gaussian);
+
+        class SquashingImpl : public torch::nn::Module {
+        public:
+            SquashingImpl() = default;
+
+            inline torch::Tensor forward(torch::Tensor x)
+            {
+                return functional::squashing(x);
+            }
+        };
+        TORCH_MODULE(Squashing);
     } // namespace nn
 } // namespace butane

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nn.hpp"
+#include "../nn.hpp"
 
 namespace butane {
     namespace nn {

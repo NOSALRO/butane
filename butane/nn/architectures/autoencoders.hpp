@@ -1,33 +1,34 @@
 #pragma once
 
-#include "../data/dataloader.hpp"
-#include "nn.hpp"
+#include "../../data/dataloader.hpp"
+#include "../nn.hpp"
 
 namespace butane {
     namespace nn {
+        template <typename Encoder, typename Decoder>
         class AEImpl : public torch::nn::Module {
         public:
-            AEImpl(torch::nn::Sequential& encoder, torch::nn::Sequential& decoder) : _enc(encoder), _dec(decoder)
+            AEImpl(Encoder& encoder, Decoder& decoder) : _encoder(encoder), _decoder(decoder)
             {
-                register_module("Encoder", _enc);
-                register_module("Decoder", _dec);
+                register_module("Encoder", _encoder);
+                register_module("Decoder", _decoder);
             }
 
             torch::Tensor forward(torch::Tensor x)
             {
-                torch::Tensor z = _enc->forward(x);
-                torch::Tensor reconstructed = _dec->forward(z);
+                torch::Tensor z = _encoder->forward(x);
+                torch::Tensor reconstructed = _decoder->forward(z);
                 return reconstructed;
             }
 
             torch::Tensor encode(torch::Tensor x)
             {
-                return _enc->forward(x);
+                return _encoder->forward(x);
             }
 
             torch::Tensor decode(torch::Tensor x)
             {
-                return _dec->forward(x);
+                return _decoder->forward(x);
             }
 
             static torch::Tensor loss_fn(torch::Tensor x_hat, torch::Tensor x)
@@ -40,7 +41,7 @@ namespace butane {
                 data::Dataloader& dl,
                 std::shared_ptr<torch::optim::Optimizer> optimizer,
                 F loss_fn_,
-                boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
+                std::shared_ptr<Scheduler> scheduler = nullptr)
             {
                 float sum_loss = 0.f;
                 int n_batches = dl.batches();
@@ -58,57 +59,50 @@ namespace butane {
                 }
 
                 if (this->is_training() && scheduler)
-                    scheduler.value()->step();
+                    scheduler->step();
 
                 float avg_loss = sum_loss / n_batches;
                 std::cout << "Loss: " << avg_loss << std::endl;
             }
 
-        private:
-            torch::nn::Sequential _enc, _dec;
+        protected:
+            Encoder& _encoder;
+            Decoder& _decoder;
         };
 
-        TORCH_MODULE(AE);
+        TORCH_MODULE_TEMPLATED(AE);
 
-        template <typename Quantizer>
-        class VQVAEImpl : public torch::nn::Module {
+        // Deduction guide
+        template <typename Encoder, typename Decoder>
+        AE(Encoder, Decoder) -> AE<Encoder, Decoder>;
+
+        template <typename Encoder, typename Decoder, typename Quantizer>
+        class VQVAEImpl : public AEImpl<Encoder, Decoder> {
         public:
-            VQVAEImpl(torch::nn::Sequential encoder, torch::nn::Sequential decoder, Quantizer quantizer)
-                : _enc(encoder), _dec(decoder), _quantizer(quantizer)
+            VQVAEImpl(Encoder& encoder, Decoder& decoder, Quantizer& quantizer)
+                : AEImpl<Encoder, Decoder>(encoder, decoder), _quantizer(quantizer)
             {
-                register_module("Encoder", _enc);
-                register_module("Quantizer", _quantizer);
-                register_module("Decoder", _dec);
+                this->register_module("Quantizer", _quantizer);
             }
 
             std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
             {
-                torch::Tensor z = _enc->forward(x);
+                torch::Tensor z = this->_encoder->forward(x);
                 torch::Tensor quantized_z, quantization_loss;
                 std::tie(quantized_z, quantization_loss) = _quantizer->forward(z);
-                torch::Tensor reconstructed = _dec->forward(quantized_z);
+                torch::Tensor reconstructed = this->_decoder->forward(quantized_z);
                 return {reconstructed, quantization_loss};
-            }
-
-            torch::Tensor encode(torch::Tensor x)
-            {
-                return _enc->forward(x);
             }
 
             torch::Tensor quantize(torch::Tensor x)
             {
-                torch::Tensor z = _enc->forward(x);
+                torch::Tensor z = this->_encoder->forward(x);
                 return _quantizer->forward(z);
             }
 
             torch::Tensor centers()
             {
                 return _quantizer->centers();
-            }
-
-            torch::Tensor decode(torch::Tensor x)
-            {
-                return _dec->forward(x);
             }
 
             static std::tuple<torch::Tensor, torch::Tensor> loss_fn(torch::Tensor x_hat, torch::Tensor x, torch::Tensor vq_loss)
@@ -124,7 +118,7 @@ namespace butane {
                 data::Dataloader& dl,
                 std::shared_ptr<torch::optim::Optimizer> optimizer,
                 F loss_fn_,
-                boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
+                std::shared_ptr<Scheduler> scheduler = nullptr)
             {
                 float sum_loss = 0.f;
                 float sum_quantization_loss = 0.f;
@@ -148,7 +142,7 @@ namespace butane {
                 }
 
                 if (this->is_training() && scheduler)
-                    scheduler.value()->step();
+                    scheduler->step();
 
                 float avg_loss = sum_loss / n_batches;
                 float avg_quantization_loss = sum_quantization_loss / n_batches;
@@ -156,53 +150,29 @@ namespace butane {
                 std::cout << "Loss: " << avg_loss << " Reconstruction Loss: " << avg_loss_rec << " Quantization Loss: " << avg_quantization_loss << std::endl;
             }
 
-        private:
-            torch::nn::Sequential _enc, _dec;
-            Quantizer _quantizer;
+        protected:
+            Quantizer& _quantizer;
         };
 
         TORCH_MODULE_TEMPLATED(VQVAE);
 
-        template <typename Quantizer>
-        class MLVQVAEImpl : public torch::nn::Module {
+        template <typename Encoder, typename Decoder, typename Quantizer>
+        VQVAE(Encoder, Decoder, Quantizer) -> VQVAE<Encoder, Decoder, Quantizer>;
+
+        template <typename Encoder, typename Decoder, typename Quantizer>
+        class MLVQVAEImpl : public VQVAEImpl<Encoder, Decoder, Quantizer> {
         public:
-            MLVQVAEImpl(torch::nn::Sequential& encoder, torch::nn::Sequential& decoder, Quantizer& quantizer) : _enc(encoder), _dec(decoder), _quantizer(quantizer)
-            {
-                register_module("Encoder", _enc);
-                register_module("Quantizer", _quantizer);
-                register_module("Decoder", _dec);
-            }
+            MLVQVAEImpl(Encoder& encoder, Decoder& decoder, Quantizer& quantizer) : VQVAEImpl<Encoder, Decoder, Quantizer>(encoder, decoder, quantizer) {}
 
             std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(torch::Tensor x)
             {
-                torch::Tensor z = _enc->forward(x);
-                torch::Tensor reconstructed = _dec->forward(z);
+                torch::Tensor z = this->_encoder->forward(x);
+                torch::Tensor reconstructed = this->_decoder->forward(z);
 
                 torch::Tensor quantized_z, quantization_loss;
-                std::tie(quantized_z, quantization_loss) = _quantizer->forward(z);
-                torch::Tensor quantized_reconstructed = _dec->forward(quantized_z);
+                std::tie(quantized_z, quantization_loss) = this->_quantizer->forward(z);
+                torch::Tensor quantized_reconstructed = this->_decoder->forward(quantized_z);
                 return {reconstructed, quantized_reconstructed, quantization_loss};
-            }
-
-            torch::Tensor encode(torch::Tensor x)
-            {
-                return _enc->forward(x);
-            }
-
-            torch::Tensor quantize(torch::Tensor x)
-            {
-                torch::Tensor z = _enc->forward(x);
-                return _quantizer->forward(z);
-            }
-
-            torch::Tensor centers()
-            {
-                return _quantizer->centers();
-            }
-
-            torch::Tensor decode(torch::Tensor x)
-            {
-                return _dec->forward(x);
             }
 
             static std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> loss_fn(torch::Tensor x_hat, torch::Tensor x_quantized_hat, torch::Tensor x, torch::Tensor vq_loss)
@@ -219,7 +189,7 @@ namespace butane {
                 data::Dataloader& dl,
                 std::shared_ptr<torch::optim::Optimizer> optimizer,
                 F loss_fn_,
-                boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
+                std::shared_ptr<Scheduler> scheduler = nullptr)
             {
                 float sum_loss = 0.f;
                 float sum_quantization_loss = 0.f;
@@ -246,7 +216,7 @@ namespace butane {
                 }
 
                 if (this->is_training() && scheduler)
-                    scheduler.value()->step();
+                    scheduler->step();
 
                 float avg_loss = sum_loss / n_batches;
                 float avg_quantization_loss = sum_quantization_loss / n_batches;
@@ -254,11 +224,10 @@ namespace butane {
                 float avg_loss_vq = sum_loss_vq / n_batches;
                 std::cout << "Loss: " << avg_loss << " Reconstruction Loss: " << avg_loss_ae << " Reconstruction Quant Loss: " << avg_loss_vq << " Quantization Loss: " << avg_quantization_loss << std::endl;
             }
-
-        private:
-            torch::nn::Sequential& _enc, _dec;
-            Quantizer& _quantizer;
         };
         TORCH_MODULE_TEMPLATED(MLVQVAE);
+
+        template <typename Encoder, typename Decoder, typename Quantizer>
+        MLVQVAE(Encoder, Decoder, Quantizer) -> MLVQVAE<Encoder, Decoder, Quantizer>;
     } // namespace nn
 } // namespace butane

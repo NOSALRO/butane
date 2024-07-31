@@ -37,22 +37,34 @@ int main(int argc, char** argv)
 
     torch::nn::Sequential encoder(c_enc, butane::nn::functional::flatten(1), mlp_enc);
     torch::nn::Sequential decoder(mlp_dec, butane::nn::functional::unflatten(1, c_enc->output_size()), c_dec);
-    butane::nn::MLVQVAE<butane::nn::Quantizer> model(encoder, decoder, quantizer);
+    butane::nn::MLVQVAE model(encoder, decoder, quantizer);
     model->to(dev);
 
     butane::data::Dataset ds("data/mnist_data.pt", "data/mnist_targets.pt");
     butane::data::Dataset test_ds("data/mnist_test_data.pt", "data/mnist_test_targets.pt");
     ds.to(dev);
     test_ds.to(dev);
+    butane::data::ops::drop(ds, 0.5);
     butane::data::Dataloader dl(ds, 64);
     butane::data::Dataloader test_dl(ds, 64, false);
 
     std::shared_ptr<torch::optim::Adam> optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
     std::shared_ptr<butane::optim::CyclicLR> scheduler = std::make_shared<butane::optim::CyclicLR>(*optimizer, 1e-04, 1e-03, 2000);
 
-    butane::nn::ModelTrainer trainer(model, dl, optimizer);
-    trainer(10, model->loss_fn, 3, test_dl);
+    for (const auto& i : optimizer->param_groups())
+        std::cout << i.options().get_lr() << std::endl;
+
+    butane::nn::ModelTrainer trainer(model, dl, optimizer, scheduler);
+    trainer(4, model->loss_fn, 3, test_dl);
     trainer.eval(test_dl, model->loss_fn);
 
+    for (const auto& i : optimizer->param_groups())
+        std::cout << i.options().get_lr() << std::endl;
+
+    optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
+    scheduler = std::make_shared<butane::optim::CyclicLR>(*optimizer, 1e-04, 1e-03, 2000);
+
+    for (const auto& i : optimizer->param_groups())
+        std::cout << i.options().get_lr() << std::endl;
     return 0;
 }

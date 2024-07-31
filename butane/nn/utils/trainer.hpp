@@ -1,19 +1,19 @@
 #pragma once
 
-#include "../data/dataloader.hpp"
-#include "nn.hpp"
+#include "../../data/dataloader.hpp"
+#include "../nn.hpp"
 #include <boost/optional.hpp>
 
 namespace butane {
     namespace nn {
-        template <typename Model, typename Scheduler = torch::optim::LRScheduler>
+        template <typename Model, typename Scheduler>
         class ModelTrainer {
         public:
             ModelTrainer(
                 Model& model,
                 data::Dataloader& dl,
                 std::shared_ptr<torch::optim::Optimizer> optimizer,
-                boost::optional<std::shared_ptr<Scheduler>> scheduler = boost::none)
+                std::shared_ptr<Scheduler> scheduler = nullptr)
                 : _model(model), _dl(dl), _optimizer(optimizer), _scheduler(scheduler) {}
 
             template <typename F>
@@ -40,7 +40,11 @@ namespace butane {
             Model& _model;
             data::Dataloader& _dl;
             std::shared_ptr<torch::optim::Optimizer> _optimizer;
-            boost::optional<std::shared_ptr<Scheduler>> _scheduler;
+            std::shared_ptr<Scheduler> _scheduler;
         };
+
+        // template <typename Model, typename Scheduler>
+        // ModelTrainer(Model, data::Dataloader&, std::shared_ptr<torch::optim::Optimizer>, std::shared_ptr<Scheduler>) -> ModelTrainer<Model, Scheduler>;
+
     } // namespace nn
 } // namespace butane
