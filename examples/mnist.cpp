@@ -30,7 +30,7 @@ int main(int argc, char** argv)
 
     std::shared_ptr<torch::optim::Adam> optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
     std::shared_ptr<butane::optim::CyclicLR> scheduler = std::make_shared<butane::optim::CyclicLR>(*optimizer, 1e-04, 1e-03, 2000);
-    ModelTrainer<SimpleClassifier, butane::optim::CyclicLR> trainer(model, dl, optimizer, scheduler);
+    ModelTrainer trainer(model, dl, optimizer, scheduler);
     trainer(10, model->loss_fn, 3, test_dl);
     trainer.eval(test_dl, model->loss_fn);
 

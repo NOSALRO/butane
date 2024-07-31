@@ -6,7 +6,7 @@
 
 namespace butane {
     namespace nn {
-        template <typename Model, typename Scheduler>
+        template <typename Model, typename Scheduler = torch::optim::LRScheduler>
         class ModelTrainer {
         public:
             ModelTrainer(
@@ -42,9 +42,6 @@ namespace butane {
             std::shared_ptr<torch::optim::Optimizer> _optimizer;
             std::shared_ptr<Scheduler> _scheduler;
         };
-
-        // template <typename Model, typename Scheduler>
-        // ModelTrainer(Model, data::Dataloader&, std::shared_ptr<torch::optim::Optimizer>, std::shared_ptr<Scheduler>) -> ModelTrainer<Model, Scheduler>;
 
     } // namespace nn
 } // namespace butane

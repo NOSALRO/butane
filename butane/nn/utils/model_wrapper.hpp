@@ -5,9 +5,15 @@
 
 namespace butane {
     namespace nn {
+        template<typename Model>
         class SimpleClassifierImpl : public torch::nn::Module {
         public:
-            SimpleClassifierImpl(torch::nn::Sequential model) : _model(std::move(model))
+            SimpleClassifierImpl(Model& model) : _model(model)
+            {
+                register_module("Classifier", _model);
+            }
+
+            SimpleClassifierImpl(Model model) : _model(model)
             {
                 register_module("Classifier", _model);
             }
@@ -43,7 +49,7 @@ namespace butane {
                 }
 
                 if (_model->is_training() && scheduler)
-                    scheduler.value()->step();
+                    scheduler->step();
 
                 float avg_loss = sum_loss / n_batches;
                 float accuracy = correct_preds / static_cast<float>(dl.dataset().sizes()[0]);
@@ -51,9 +57,13 @@ namespace butane {
             }
 
         private:
-            torch::nn::Sequential _model;
+            Model _model;
         };
 
-        TORCH_MODULE(SimpleClassifier);
+        TORCH_MODULE_TEMPLATED(SimpleClassifier);
+
+        template<typename Model>
+        SimpleClassifier(Model) -> SimpleClassifier<Model>;
+
     } // namespace nn
 } // namespace butane
