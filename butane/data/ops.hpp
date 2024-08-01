@@ -11,14 +11,14 @@ namespace butane {
                 torch::Tensor& _data = dataset.data_ref();
                 torch::Tensor& _targets = dataset.targets_ref();
                 if (prec == 0) {
-                    _data = torch::empty({}).to(_data.device());
-                    _targets = torch::empty({}).to(_targets.device());
+                    _data = torch::Tensor();
+                    _targets = torch::Tensor();
                     return;
                 }
                 int numel_to_keep = std::floor(dataset.size() * prec);
                 torch::Tensor idx_to_keep = torch::randperm(dataset.size()).index({torch::arange(numel_to_keep)});
                 _data = _data.index({idx_to_keep});
-                if (!_targets.numel()) 
+                if (_targets.numel() != 0)
                     _targets = _targets.index({idx_to_keep});
             }
 
@@ -30,7 +30,7 @@ namespace butane {
                 torch::Tensor& _targets = dataset.targets_ref();
                 torch::Tensor idx_to_keep = torch::randperm(dataset.size()).index({torch::arange(max_size)});
                 _data = _data.index({idx_to_keep});
-                if (!_targets.numel()) 
+                if (_targets.numel() != 0) 
                     _targets = _targets.index({idx_to_keep});
             }
 
@@ -48,7 +48,7 @@ namespace butane {
                     prev_mu = mu;
                     int denser = torch::argmin(torch::sum(distances, 1)).item<int>();
                     _data = torch::vstack({_data.slice(0, 0, denser), _data.slice(0, denser + 1, dataset.size())});
-                    if (!_targets.numel()) {
+                    if (_targets.numel() != 0) {
                         _targets = torch::cat({_targets.slice(0, 0, denser), _targets.slice(0, denser + 1, dataset.size())}, 0);
                     }
                 }
