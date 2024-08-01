@@ -11,13 +11,15 @@ namespace butane {
                 torch::Tensor& _data = dataset.data_ref();
                 torch::Tensor& _targets = dataset.targets_ref();
                 if (prec == 0) {
-                    _data = torch::Tensor();
+                    _data = torch::empty({}).to(_data.device());
+                    _targets = torch::empty({}).to(_targets.device());
                     return;
                 }
                 int numel_to_keep = std::floor(dataset.size() * prec);
                 torch::Tensor idx_to_keep = torch::randperm(dataset.size()).index({torch::arange(numel_to_keep)});
                 _data = _data.index({idx_to_keep});
-                _targets = !_targets.numel() ? _targets.index({idx_to_keep}) : torch::Tensor();
+                if (!_targets.numel()) 
+                    _targets = _targets.index({idx_to_keep});
             }
 
             void drop_to_max_size(Dataset& dataset, int max_size)
@@ -28,7 +30,8 @@ namespace butane {
                 torch::Tensor& _targets = dataset.targets_ref();
                 torch::Tensor idx_to_keep = torch::randperm(dataset.size()).index({torch::arange(max_size)});
                 _data = _data.index({idx_to_keep});
-                _targets = !_targets.numel() ? _targets.index({idx_to_keep}) : torch::Tensor();
+                if (!_targets.numel()) 
+                    _targets = _targets.index({idx_to_keep});
             }
 
             void sparsify(Dataset& dataset)
