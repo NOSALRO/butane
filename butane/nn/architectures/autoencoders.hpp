@@ -31,6 +31,11 @@ namespace butane {
                 return _decoder->forward(x);
             }
 
+            torch::Device device()
+            {
+                return this->parameters()[0].device();
+            }
+
             static torch::Tensor loss_fn(torch::Tensor x_hat, torch::Tensor x)
             {
                 return torch::nn::functional::mse_loss(x_hat, x);
