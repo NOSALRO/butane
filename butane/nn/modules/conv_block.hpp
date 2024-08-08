@@ -311,6 +311,15 @@ namespace butane {
                 return _seq->forward(x);
             }
 
+            torch::Tensor output_size()
+            {
+                torch::NoGradGuard no_grad;
+                this->eval();
+                torch::Tensor sz = torch::tensor(this->forward(torch::rand(_input_dims).unsqueeze(0)).squeeze(0).sizes());
+                this->train();
+                return sz;
+            }
+
             torch::nn::Sequential _seq;
 
         private:
