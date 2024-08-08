@@ -102,7 +102,7 @@ namespace butane {
             torch::Tensor quantize(torch::Tensor x)
             {
                 torch::Tensor z = this->_encoder->forward(x);
-                return _quantizer->forward(z);
+                return std::get<0>(_quantizer->forward(z));
             }
 
             torch::Tensor centers()
