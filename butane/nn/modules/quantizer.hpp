@@ -69,6 +69,7 @@ namespace butane {
             }
 
             torch::Tensor centers() const { return embedding->weight; }
+            double beta() const { return _beta; }
 
         protected:
             int _latent_dim, _n_centers;

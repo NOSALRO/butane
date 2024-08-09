@@ -8,27 +8,30 @@ namespace butane {
         template <typename Encoder, typename Decoder>
         class AEImpl : public torch::nn::Module {
         public:
-            AEImpl(Encoder& encoder, Decoder& decoder) : _encoder(encoder), _decoder(decoder)
+            Encoder& encoder_;
+            Decoder& decoder_;
+
+            AEImpl(Encoder& encoder, Decoder& decoder) : encoder_(encoder), decoder_(decoder)
             {
-                register_module("Encoder", _encoder);
-                register_module("Decoder", _decoder);
+                register_module("Encoder", encoder_);
+                register_module("Decoder", decoder_);
             }
 
             torch::Tensor forward(torch::Tensor x)
             {
-                torch::Tensor z = _encoder->forward(x);
-                torch::Tensor reconstructed = _decoder->forward(z);
+                torch::Tensor z = encoder_->forward(x);
+                torch::Tensor reconstructed = decoder_->forward(z);
                 return reconstructed;
             }
 
             torch::Tensor encode(torch::Tensor x)
             {
-                return _encoder->forward(x);
+                return encoder_->forward(x);
             }
 
             torch::Tensor decode(torch::Tensor x)
             {
-                return _decoder->forward(x);
+                return decoder_->forward(x);
             }
 
             torch::Device device()
@@ -69,10 +72,6 @@ namespace butane {
                 float avg_loss = sum_loss / n_batches;
                 std::cout << "Loss: " << avg_loss << std::endl;
             }
-
-        protected:
-            Encoder& _encoder;
-            Decoder& _decoder;
         };
 
         TORCH_MODULE_TEMPLATED(AE);
@@ -84,30 +83,32 @@ namespace butane {
         template <typename Encoder, typename Decoder, typename Quantizer>
         class VQVAEImpl : public AEImpl<Encoder, Decoder> {
         public:
+            Quantizer& quantizer_;
+
             VQVAEImpl(Encoder& encoder, Decoder& decoder, Quantizer& quantizer)
-                : AEImpl<Encoder, Decoder>(encoder, decoder), _quantizer(quantizer)
+                : AEImpl<Encoder, Decoder>(encoder, decoder), quantizer_(quantizer)
             {
-                this->register_module("Quantizer", _quantizer);
+                this->register_module("Quantizer", quantizer_);
             }
 
             std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
             {
-                torch::Tensor z = this->_encoder->forward(x);
+                torch::Tensor z = this->encoder_->forward(x);
                 torch::Tensor quantized_z, quantization_loss;
-                std::tie(quantized_z, quantization_loss) = _quantizer->forward(z);
-                torch::Tensor reconstructed = this->_decoder->forward(quantized_z);
+                std::tie(quantized_z, quantization_loss) = quantizer_->forward(z);
+                torch::Tensor reconstructed = this->decoder_->forward(quantized_z);
                 return {reconstructed, quantization_loss};
             }
 
             torch::Tensor quantize(torch::Tensor x)
             {
-                torch::Tensor z = this->_encoder->forward(x);
-                return std::get<0>(_quantizer->forward(z));
+                torch::Tensor z = this->encoder_->forward(x);
+                return std::get<0>(quantizer_->forward(z));
             }
 
             torch::Tensor centers()
             {
-                return _quantizer->centers();
+                return quantizer_->centers();
             }
 
             static std::tuple<torch::Tensor, torch::Tensor> loss_fn(torch::Tensor x_hat, torch::Tensor x, torch::Tensor vq_loss)
@@ -142,7 +143,7 @@ namespace butane {
                     }
 
                     sum_loss += loss.item<float>();
-                    sum_quantization_loss += torch::Tensor(quantization_loss).item<float>();
+                    sum_quantization_loss += quantization_loss.item<float>();
                     sum_loss_rec += loss_rec.item<float>();
                 }
 
@@ -154,9 +155,6 @@ namespace butane {
                 float avg_loss_rec = sum_loss_rec / n_batches;
                 std::cout << "Loss: " << avg_loss << " Reconstruction Loss: " << avg_loss_rec << " Quantization Loss: " << avg_quantization_loss << std::endl;
             }
-
-        protected:
-            Quantizer& _quantizer;
         };
 
         TORCH_MODULE_TEMPLATED(VQVAE);
@@ -171,12 +169,12 @@ namespace butane {
 
             std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(torch::Tensor x)
             {
-                torch::Tensor z = this->_encoder->forward(x);
-                torch::Tensor reconstructed = this->_decoder->forward(z);
+                torch::Tensor z = this->encoder_->forward(x);
+                torch::Tensor reconstructed = this->decoder_->forward(z);
 
                 torch::Tensor quantized_z, quantization_loss;
-                std::tie(quantized_z, quantization_loss) = this->_quantizer->forward(z);
-                torch::Tensor quantized_reconstructed = this->_decoder->forward(quantized_z);
+                std::tie(quantized_z, quantization_loss) = this->quantizer_->forward(z);
+                torch::Tensor quantized_reconstructed = this->decoder_->forward(quantized_z);
                 return {reconstructed, quantized_reconstructed, quantization_loss};
             }
 
@@ -215,7 +213,7 @@ namespace butane {
                     }
 
                     sum_loss += loss.item<float>();
-                    sum_quantization_loss += torch::Tensor(quantization_loss).item<float>();
+                    sum_quantization_loss += quantization_loss.item<float>();
                     sum_loss_ae += loss_ae.item<float>();
                     sum_loss_vq += loss_vq.item<float>();
                 }

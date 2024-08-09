@@ -51,9 +51,6 @@ int main(int argc, char** argv)
     std::shared_ptr<torch::optim::Adam> optimizer = std::make_shared<torch::optim::Adam>(model->parameters(), torch::optim::AdamOptions().lr(1e-04));
     std::shared_ptr<butane::optim::CyclicLR> scheduler = std::make_shared<butane::optim::CyclicLR>(*optimizer, 1e-04, 1e-03, 2000);
 
-    for (const auto& i : optimizer->param_groups())
-        std::cout << i.options().get_lr() << std::endl;
-
     butane::nn::ModelTrainer trainer(model, dl, optimizer, scheduler);
     trainer(4, model->loss_fn, 3, test_dl);
     trainer.eval(test_dl, model->loss_fn);
