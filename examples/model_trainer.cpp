@@ -5,7 +5,7 @@ using namespace butane::nn;
 int main(int argc, char** argv)
 {
     torch::Device dev(torch::kCUDA);
-    Conv2dBlockImpl<torch::nn::BatchNorm2d, torch::nn::MaxPool2d>::Config co_enc{
+    ConvBlockOptions co_enc{
         .input_dims = {1, 28, 28},
         .channels = {32, 32},
         .activation_function = {torch::nn::GELU(), torch::nn::GELU()},
@@ -22,7 +22,7 @@ int main(int argc, char** argv)
 
     MLPBlock mlp_dec(100, c_enc->output_size().prod().item<int>(), std::vector<int64_t>{64, 64}, AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::ReLU()}, false);
 
-    ConvTranspose2dBlockImpl<torch::nn::BatchNorm2d, torch::nn::MaxPool2d>::Config co_dec{
+    ConvTransposeBlockOptions co_dec{
         .input_dims = {32, 28, 28},
         .channels = {32, 1},
         .activation_function = {torch::nn::GELU(), torch::nn::Sigmoid()},
@@ -35,8 +35,8 @@ int main(int argc, char** argv)
 
     torch::nn::Sequential encoder(c_enc, functional::flatten(1), mlp_enc);
     torch::nn::Sequential decoder(mlp_dec, functional::unflatten(1, c_enc->output_size()), c_dec);
-    MLVQVAE<Quantizer> model(encoder, decoder, quantizer);
-    // VQVAE<Quantizer> model(encoder, decoder, quantizer);
+    MLVQVAE model(encoder, decoder, quantizer);
+    // VQVAE model(encoder, decoder, quantizer);
     // AE model(encoder, decoder);
     model->to(dev);
 

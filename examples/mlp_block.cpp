@@ -2,7 +2,7 @@
 
 int main(int argc, char** argv)
 {
-    butane::nn::MLPBlock mlp(butane::nn::MLPBlockImpl::Config{
+    butane::nn::MLPBlock mlp(butane::nn::MLPBlockOptions{
         .input_dims = 2,
         .output_dims = 3,
         .hidden_dims = std::vector<int64_t>{64, 64},

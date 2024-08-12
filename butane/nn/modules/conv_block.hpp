@@ -4,37 +4,54 @@
 
 namespace butane {
     namespace nn {
+        using ivec = dtypes::ivec;
+        using ivec2d = dtypes::ivec2d;
+        using bvec = dtypes::bvec;
+        using dvec = dtypes::dvec;
+        using conv_padding_mode_t = dtypes::conv_padding_mode_t;
+        using pad_enum_vec = dtypes::pad_enum_vec;
+
+        struct ConvBlockOptions {
+            ivec input_dims;
+            ivec channels;
+            AnyModuleList activation_function = AnyModuleList(torch::nn::ReLU());
+            ivec2d conv_kernels = ivec2d{{3}};
+            ivec2d conv_stride = ivec2d{{1}};
+            ivec2d conv_pad = ivec2d{{1}};
+            bvec conv_bias = bvec{false};
+            pad_enum_vec conv_pad_mode = pad_enum_vec{torch::kZeros};
+            ivec2d pool_kernels = ivec2d{{0}};
+            ivec2d pool_stride = ivec2d{{1}};
+            ivec2d pool_pad = ivec2d{{1}};
+            dvec dropout = dvec{0.0};
+            bool output_activation = true;
+            bvec normalization = bvec{false};
+        };
+
+        struct ConvTransposeBlockOptions {
+            ivec input_dims;
+            ivec channels;
+            AnyModuleList activation_function = AnyModuleList(torch::nn::ReLU());
+            ivec2d conv_kernels = ivec2d{{3}};
+            ivec2d conv_stride = ivec2d{{1}};
+            ivec2d conv_pad = ivec2d{{1}};
+            bvec conv_bias = bvec{false};
+            ivec2d conv_output_pad = ivec2d{{0}};
+            ivec2d pool_kernels = ivec2d{{0}};
+            ivec2d pool_stride = ivec2d{{1}};
+            ivec2d pool_pad = ivec2d{{1}};
+            dvec dropout = dvec{0.0};
+            bool output_activation = true;
+            bvec normalization = bvec{false};
+        };
+
         template <int N, typename Norm, typename Pool>
         class ConvNdBlockImpl : public torch::nn::Module {
         public:
-            using ivec = dtypes::ivec;
-            using ivec2d = dtypes::ivec2d;
-            using bvec = dtypes::bvec;
-            using dvec = dtypes::dvec;
-            using conv_padding_mode_t = dtypes::conv_padding_mode_t;
-            using pad_enum_vec = dtypes::pad_enum_vec;
             using Conv = dtypes::Conv<N>;
-
-            struct Config {
-                ivec input_dims;
-                ivec channels;
-                AnyModuleList activation_function = AnyModuleList(torch::nn::ReLU());
-                ivec2d conv_kernels = ivec2d{{3}};
-                ivec2d conv_stride = ivec2d{{1}};
-                ivec2d conv_pad = ivec2d{{1}};
-                bvec conv_bias = bvec{false};
-                pad_enum_vec conv_pad_mode = pad_enum_vec{torch::kZeros};
-                ivec2d pool_kernels = ivec2d{{0}};
-                ivec2d pool_stride = ivec2d{{1}};
-                ivec2d pool_pad = ivec2d{{1}};
-                dvec dropout = dvec{0.0};
-                bool output_activation = true;
-                bvec normalization = bvec{false};
-            };
-
             ConvNdBlockImpl() = default;
 
-            ConvNdBlockImpl(const Config& conf)
+            ConvNdBlockImpl(const ConvBlockOptions& conf)
             {
                 *this = ConvNdBlockImpl(
                     conf.input_dims, conf.channels,
@@ -191,34 +208,10 @@ namespace butane {
         template <int N, typename Norm, typename Pool>
         class ConvTransposeNdBlockImpl : public torch::nn::Module {
         public:
-            using ivec = dtypes::ivec;
-            using ivec2d = dtypes::ivec2d;
-            using bvec = dtypes::bvec;
-            using dvec = dtypes::dvec;
-            using conv_padding_mode_t = dtypes::conv_padding_mode_t;
-            using pad_enum_vec = dtypes::pad_enum_vec;
             using ConvTranspose = dtypes::ConvTranspose<N>;
-
-            struct Config {
-                ivec input_dims;
-                ivec channels;
-                AnyModuleList activation_function = AnyModuleList(torch::nn::ReLU());
-                ivec2d conv_kernels = ivec2d{{3}};
-                ivec2d conv_stride = ivec2d{{1}};
-                ivec2d conv_pad = ivec2d{{1}};
-                bvec conv_bias = bvec{false};
-                ivec2d conv_output_pad = ivec2d{{0}};
-                ivec2d pool_kernels = ivec2d{{0}};
-                ivec2d pool_stride = ivec2d{{1}};
-                ivec2d pool_pad = ivec2d{{1}};
-                dvec dropout = dvec{0.0};
-                bool output_activation = true;
-                bvec normalization = bvec{false};
-            };
-
             ConvTransposeNdBlockImpl() = default;
 
-            ConvTransposeNdBlockImpl(const Config& conf)
+            ConvTransposeNdBlockImpl(const ConvTransposeBlockOptions& conf)
             {
                 *this = ConvTransposeNdBlockImpl(
                     conf.input_dims, conf.channels,

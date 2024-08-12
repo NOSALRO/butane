@@ -3,7 +3,7 @@
 int main(int argc, char** argv)
 {
     torch::Device dev(torch::kCUDA);
-    butane::nn::Conv2dBlockImpl<torch::nn::BatchNorm2d, torch::nn::MaxPool2d>::Config co_enc{
+    butane::nn::ConvBlockOptions co_enc{
         .input_dims = {1, 28, 28},
         .channels = {32, 32},
         .activation_function = {torch::nn::GELU(), torch::nn::GELU()},
@@ -22,7 +22,7 @@ int main(int argc, char** argv)
 
     butane::nn::MLPBlock mlp_dec(100, c_enc->output_size().prod().item<int>(), std::vector<int64_t>{64, 64}, butane::nn::AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::ReLU()}, false);
 
-    butane::nn::ConvTranspose2dBlockImpl<torch::nn::BatchNorm2d, torch::nn::MaxPool2d>::Config co_dec{
+    butane::nn::ConvTransposeBlockOptions co_dec{
         .input_dims = {32, 28, 28},
         .channels = {32, 1},
         .activation_function = {torch::nn::GELU(), torch::nn::Sigmoid()},

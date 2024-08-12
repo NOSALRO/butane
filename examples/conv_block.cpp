@@ -4,7 +4,7 @@ using namespace butane::nn;
 
 int main(int argc, char** argv)
 {
-    Conv1dBlockImpl<torch::nn::InstanceNorm1d, torch::nn::MaxPool1d>::Config co{
+    ConvBlockOptions co{
         .input_dims = {2, 100},
         .channels = {32, 128},
         .activation_function = {torch::nn::ReLU(), torch::nn::GELU()},

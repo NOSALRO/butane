@@ -5,7 +5,7 @@ using namespace butane::nn;
 int main(int argc, char** argv)
 {
     torch::Device dev(torch::kCUDA);
-    Conv2dBlockImpl<torch::nn::BatchNorm2d, torch::nn::MaxPool2d>::Config co{
+    ConvBlockOptions co{
         .input_dims = {1, 28, 28},
         .channels = {32, 32},
         .activation_function = {torch::nn::ReLU(), torch::nn::ReLU()},

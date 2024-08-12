@@ -4,25 +4,25 @@
 
 namespace butane {
     namespace nn {
+        using ivec = dtypes::ivec;
+        using dvec = dtypes::dvec;
+        using bvec = dtypes::bvec;
+
+        struct MLPBlockOptions {
+            int input_dims;
+            int output_dims;
+            ivec hidden_dims;
+            AnyModuleList activation_function = AnyModuleList({torch::nn::ReLU()});
+            bool output_activation = false;
+            bvec bias = bvec{true};
+            dvec dropout = dvec{0.0};
+        };
+
         class MLPBlockImpl : public torch::nn::Module {
         public:
-            using ivec = dtypes::ivec;
-            using dvec = dtypes::dvec;
-            using bvec = dtypes::bvec;
-
-            struct Config {
-                int input_dims;
-                int output_dims;
-                ivec hidden_dims;
-                AnyModuleList activation_function = AnyModuleList({torch::nn::ReLU()});
-                bool output_activation = false;
-                bvec bias = bvec{true};
-                dvec dropout = dvec{0.0};
-            };
-
             MLPBlockImpl() = default;
 
-            MLPBlockImpl(const Config& conf)
+            MLPBlockImpl(const MLPBlockOptions& conf)
             {
                 *this = MLPBlockImpl(
                     conf.input_dims, conf.output_dims,
