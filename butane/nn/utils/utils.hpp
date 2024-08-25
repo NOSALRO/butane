@@ -15,6 +15,12 @@
 #define TORCH_MODULE_TEMPLATED(Name) TORCH_MODULE_IMPL_TEMPLATED(Name, Name##Impl)
 
 namespace butane {
+
+    enum Reduction {
+        Sum,
+        Mean
+    };
+
     namespace nn {
 
         namespace dtypes {

@@ -15,7 +15,7 @@ namespace butane {
                 torch::Device device = torch::Device(torch::kCPU)) : _latent_dim(latent_dim), _n_centers(n_centers), _device(device)
             {
                 embedding = torch::nn::Embedding(_n_centers, _latent_dim);
-                embedding->weight.data().uniform_(-1. / static_cast<double>(_n_centers), 1. /static_cast<double>(_n_centers));
+                embedding->weight.data().uniform_(-1. / static_cast<double>(_n_centers), 1. / static_cast<double>(_n_centers));
                 embedding->weight.set_requires_grad(true);
                 embedding = register_module("embeddings", embedding);
             }
@@ -32,8 +32,14 @@ namespace butane {
                 quantized_latents = torch::matmul(encoding_one_hot, embedding->weight);
                 quantized_latents = quantized_latents.view(x.sizes());
 
-                torch::Tensor commitment_loss = (quantized_latents.detach() - x).pow(2).mean();
-                torch::Tensor embedding_loss = (quantized_latents - x.detach()).pow(2).mean();
+                torch::Tensor commitment_loss = (quantized_latents.detach() - x).pow(2);
+                torch::Tensor embedding_loss = (quantized_latents - x.detach()).pow(2);
+                switch (_reduction) {
+                case Mean:
+                    commitment_loss = commitment_loss.mean(), embedding_loss = embedding_loss.mean();
+                case Sum:
+                    commitment_loss = commitment_loss.sum(), embedding_loss = embedding_loss.sum();
+                }
 
                 // Backprop trick. latent - latents = 0 however gradients are copied.
                 torch::Tensor quantization_loss = _beta * commitment_loss + embedding_loss;
@@ -62,6 +68,11 @@ namespace butane {
                 _beta = new_beta;
             }
 
+            void reduction(enum Reduction reduction_)
+            {
+                _reduction = reduction_;
+            }
+
             void change_dev(torch::Device device)
             {
                 _device = device;
@@ -76,6 +87,7 @@ namespace butane {
             bool _constrained_latent_space;
             double _beta = 1.25;
             torch::Device _device = torch::Device(torch::kCPU);
+            enum Reduction _reduction = Mean;
         };
 
         TORCH_MODULE(Quantizer);
@@ -98,8 +110,15 @@ namespace butane {
                 quantized_latents = torch::matmul(encoding_one_hot, embedding->weight);
                 quantized_latents = quantized_latents.view(x.sizes());
 
-                torch::Tensor commitment_loss = (quantized_latents.detach() - x).pow(2).mean();
-                torch::Tensor embedding_loss = (quantized_latents - x.detach()).pow(2).mean();
+                torch::Tensor commitment_loss = (quantized_latents.detach() - x).pow(2);
+                torch::Tensor embedding_loss = (quantized_latents - x.detach()).pow(2);
+
+                switch (_reduction) {
+                case Mean:
+                    commitment_loss = commitment_loss.mean(), embedding_loss = embedding_loss.mean();
+                case Sum:
+                    commitment_loss = commitment_loss.sum(), embedding_loss = embedding_loss.sum();
+                }
 
                 // Backprop trick. latent - latents = 0 however gradients are copied.
                 torch::Tensor quantization_loss = _beta * commitment_loss + embedding_loss;
