@@ -182,8 +182,7 @@ namespace butane {
 
                 if (!utils::_vec_of_zeros(pool_kernel)) {
                     auto pool_opts = Pool(0)->options;
-                    pool_opts.kernel_size(pool_kernel).stride(pool_stride);
-                    pool_pad ? pool_opts.padding(pool_pad) : noop;
+                    pool_opts.kernel_size(pool_kernel).stride(pool_stride);//.padding(pool_pad);
                     _seq->push_back(Pool(pool_opts));
                 }
 
@@ -343,8 +342,7 @@ namespace butane {
 
                 if (!utils::_vec_of_zeros(pool_kernel)) {
                     auto pool_opts = Pool(0)->options;
-                    pool_opts.kernel_size(pool_kernel).stride(pool_stride);
-                    pool_pad ? pool_opts.padding(pool_pad) : noop;
+                    pool_opts.kernel_size(pool_kernel).stride(pool_stride);//.padding(pool_pad);
                     _seq->push_back(Pool(pool_opts));
                 }
 
