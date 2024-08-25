@@ -22,7 +22,7 @@ namespace butane {
             pad_enum_vec conv_pad_mode = pad_enum_vec{torch::kZeros};
             ivec2d pool_kernels = ivec2d{{0}};
             ivec2d pool_stride = ivec2d{{1}};
-            ivec2d pool_pad = ivec2d{{1}};
+            ivec2d pool_pad = ivec2d{{0}};
             dvec dropout = dvec{0.0};
             bool output_activation = true;
             bvec normalization = bvec{false};
@@ -39,7 +39,7 @@ namespace butane {
             ivec2d conv_output_pad = ivec2d{{0}};
             ivec2d pool_kernels = ivec2d{{0}};
             ivec2d pool_stride = ivec2d{{1}};
-            ivec2d pool_pad = ivec2d{{1}};
+            ivec2d pool_pad = ivec2d{{0}};
             dvec dropout = dvec{0.0};
             bool output_activation = true;
             bvec normalization = bvec{false};
@@ -74,7 +74,7 @@ namespace butane {
                 pad_enum_vec conv_pad_mode = pad_enum_vec{torch::kZeros},
                 ivec2d pool_kernels = ivec2d{{0}},
                 ivec2d pool_stride = ivec2d{{1}},
-                ivec2d pool_pad = ivec2d{{1}},
+                ivec2d pool_pad = ivec2d{{0}},
                 dvec dropout = dvec{0.0},
                 bool output_activation = false,
                 bvec normalization = bvec{false}) : _input_dims(input_dims), _channels(channels)
@@ -182,7 +182,7 @@ namespace butane {
 
                 if (!utils::_vec_of_zeros(pool_kernel)) {
                     auto pool_opts = Pool(0)->options;
-                    pool_opts.kernel_size(pool_kernel).stride(pool_stride);//.padding(pool_pad);
+                    pool_opts.kernel_size(pool_kernel).stride(pool_stride).padding(pool_pad);
                     _seq->push_back(Pool(pool_opts));
                 }
 
@@ -234,7 +234,7 @@ namespace butane {
                 ivec2d conv_output_pad = ivec2d{{0}},
                 ivec2d pool_kernels = ivec2d{{0}},
                 ivec2d pool_stride = ivec2d{{1}},
-                ivec2d pool_pad = ivec2d{{1}},
+                ivec2d pool_pad = ivec2d{{0}},
                 dvec dropout = dvec{0.0},
                 bool output_activation = false,
                 bvec normalization = bvec{false}) : _input_dims(input_dims), _channels(channels)
@@ -342,7 +342,7 @@ namespace butane {
 
                 if (!utils::_vec_of_zeros(pool_kernel)) {
                     auto pool_opts = Pool(0)->options;
-                    pool_opts.kernel_size(pool_kernel).stride(pool_stride);//.padding(pool_pad);
+                    pool_opts.kernel_size(pool_kernel).stride(pool_stride).padding(pool_pad);
                     _seq->push_back(Pool(pool_opts));
                 }
 
