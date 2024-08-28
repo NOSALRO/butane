@@ -233,12 +233,123 @@ namespace butane {
         template <typename Encoder, typename Decoder, typename Quantizer>
         MLVQVAE(Encoder, Decoder, Quantizer) -> MLVQVAE<Encoder, Decoder, Quantizer>;
 
-        namespace utils {
-            template <typename Model>
-            struct does_clustering : std::true_type {};
+        template <typename Encoder, typename Decoder>
+        class VAEImpl : public torch::nn::Module {
+        public:
+            Encoder& encoder_;
+            Decoder& decoder_;
 
-            template <typename Encoder, typename Decoder>
-            struct does_clustering<AE<Encoder, Decoder>> : std::false_type {};
-        } // namespace utils
+            VAEImpl(Encoder& encoder, Decoder& decoder) : encoder_(encoder), decoder_(decoder)
+            {
+                register_module("Encoder", encoder_);
+                register_module("Decoder", decoder_);
+            }
+
+            std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(torch::Tensor x, bool deterministic = false)
+            {
+                torch::Tensor mu, logvar;
+                std::tie(mu, logvar) = encoder_->template forward<std::tuple<torch::Tensor, torch::Tensor>>(x);
+                torch::Tensor z = deterministic ? mu : _reparameterizate(mu, logvar);
+                torch::Tensor reconstructed = decoder_->forward(z);
+                return {reconstructed, mu, logvar};
+            }
+
+            torch::Tensor encode(torch::Tensor x, bool deterministic = true)
+            {
+                return std::get<0>(encoder_->template forward<std::tuple<torch::Tensor, torch::Tensor>>(x, deterministic));
+            }
+
+            torch::Tensor decode(torch::Tensor x)
+            {
+                return decoder_->forward(x);
+            }
+
+            torch::Device device()
+            {
+                return this->parameters()[0].device();
+            }
+
+            torch::Tensor kldiv_loss(torch::Tensor mu, torch::Tensor logvar)
+            {
+                switch (_reduction) {
+                case Mean:
+                    return _beta * torch::mean(-0.5 * torch::sum(1. + logvar - mu.pow(2) - logvar.exp(), 1));
+                case Sum:
+                    return _beta * torch::sum(-0.5 * torch::sum(1. + logvar - mu.pow(2) - logvar.exp(), 1));
+                }
+            }
+
+            static torch::Tensor loss_fn(torch::Tensor x_hat, torch::Tensor x)
+            {
+                return torch::nn::functional::mse_loss(x_hat, x);
+            }
+
+            template <typename F, typename Scheduler = torch::optim::LRScheduler>
+            void step(
+                data::Dataloader& dl,
+                std::shared_ptr<torch::optim::Optimizer> optimizer,
+                F loss_fn_,
+                std::shared_ptr<Scheduler> scheduler = nullptr)
+            {
+                float sum_loss = 0.f;
+                float sum_reconstruction_loss = 0.f;
+                float sum_kldiv_loss = 0.f;
+                int n_batches = dl.batches();
+
+                for (auto batch : dl) {
+                    this->is_training() ? optimizer->zero_grad() : noop;
+                    torch::Tensor x_reconstructed, mu, logvar;
+                    std::tie(x_reconstructed, mu, logvar) = this->forward(batch.data, this->is_training() ? false : true);
+                    torch::Tensor reconstruction_loss = loss_fn_(x_reconstructed, batch.data);
+                    torch::Tensor kldiv = kldiv_loss(mu, logvar);
+                    torch::Tensor loss = reconstruction_loss + kldiv;
+                    if (this->is_training()) {
+                        loss.backward();
+                        optimizer->step();
+                    }
+
+                    sum_loss += loss.item<float>();
+                    sum_reconstruction_loss += reconstruction_loss.item<float>();
+                    sum_kldiv_loss += kldiv.item<float>();
+                }
+
+                if (this->is_training() && scheduler)
+                    scheduler->step();
+
+                float avg_loss = sum_loss / n_batches;
+                float avg_reconstruction_loss = sum_reconstruction_loss / n_batches;
+                float avg_kldiv_loss = sum_kldiv_loss / n_batches;
+                std::cout << "Loss: " << avg_loss << " Reconstruction Loss: " << avg_reconstruction_loss << " KL Loss: " << avg_kldiv_loss << std::endl;
+            }
+
+            void set_beta(double new_beta)
+            {
+                _beta = new_beta;
+            }
+
+            void reduction(enum Reduction reduction_)
+            {
+                _reduction = reduction_;
+            }
+
+            double beta() const { return _beta; }
+
+        private:
+            double _beta = 1.;
+            enum Reduction _reduction = Mean;
+            torch::Tensor _reparameterizate(torch::Tensor mu, torch::Tensor log_var)
+            {
+                torch::Tensor epsilon = torch::randn(log_var.sizes()).to(mu.device());
+                torch::Tensor std = (0.5 * log_var).exp();
+                torch::Tensor z = epsilon.mul(std).add(mu);
+                return z;
+            }
+        };
+        TORCH_MODULE_TEMPLATED(VAE);
+
+        // Deduction guide
+        template <typename Encoder, typename Decoder>
+        VAE(Encoder, Decoder) -> VAE<Encoder, Decoder>;
+
     } // namespace nn
 } // namespace butane
