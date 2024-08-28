@@ -256,7 +256,10 @@ namespace butane {
 
             torch::Tensor encode(torch::Tensor x, bool deterministic = true)
             {
-                return std::get<0>(encoder_->template forward<std::tuple<torch::Tensor, torch::Tensor>>(x, deterministic));
+                torch::Tensor mu, logvar;
+                std::tie(mu, logvar) = encoder_->template forward<std::tuple<torch::Tensor, torch::Tensor>>(x);
+                torch::Tensor z = deterministic ? mu : _reparameterizate(mu, logvar);
+                return z;
             }
 
             torch::Tensor decode(torch::Tensor x)
