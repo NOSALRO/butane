@@ -351,5 +351,12 @@ namespace butane {
         template <typename Encoder, typename Decoder>
         VAE(Encoder, Decoder) -> VAE<Encoder, Decoder>;
 
+        namespace utils {
+            template <typename Model>
+            struct does_clustering : std::true_type {};
+
+            template <typename Encoder, typename Decoder>
+            struct does_clustering<AE<Encoder, Decoder>> : std::false_type {};
+        } // namespace utils
     } // namespace nn
 } // namespace butane
