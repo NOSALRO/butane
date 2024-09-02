@@ -136,14 +136,14 @@ namespace butane {
                 _mu = torch::nn::Sequential(
                     torch::nn::Linear(
                         torch::nn::LinearOptions(_hidden_dims[_hidden_dims.size() - 2], _hidden_dims[_hidden_dims.size() - 1])
-                            .bias(bias[_hidden_dims.size() - 1])),
-                    activation_function[_hidden_dims.size() - 2]);
+                            .bias(bias[bias.size() - 1])),
+                    activation_function[activation_function.size() - 1]);
 
                 _logvar = torch::nn::Sequential(
                     torch::nn::Linear(
                         torch::nn::LinearOptions(_hidden_dims[_hidden_dims.size() - 2], _hidden_dims[_hidden_dims.size() - 1])
-                            .bias(bias[_hidden_dims.size() - 2])),
-                    activation_function[_hidden_dims.size() - 2]);
+                            .bias(bias[bias.size() - 1])),
+                    activation_function[activation_function.size() - 1]);
 
                 register_module("mu", _mu);
                 register_module("logvar", _logvar);

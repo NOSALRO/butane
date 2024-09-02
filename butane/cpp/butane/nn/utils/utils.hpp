@@ -16,11 +16,6 @@
 
 namespace butane {
 
-    enum Reduction {
-        Sum,
-        Mean
-    };
-
     namespace nn {
 
         namespace dtypes {

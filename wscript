@@ -26,7 +26,7 @@ def options(opt):
     opt.load("boost")
     opt.load("torch")
     opt.load("eigen")
-    opt.load("torch_kmeans")
+    # opt.load("torch_kmeans")
     opt.add_option("--examples", default=False, dest='build_examples', action='store_true')
 
 
@@ -37,14 +37,12 @@ def configure(conf):
     conf.load("boost")
     conf.load("torch")
     conf.load("eigen")
-    conf.load("torch_kmeans")
+    # conf.load("torch_kmeans")
 
     # we need pthread for video saving
     conf.check_boost(required=True)
     conf.check_torch(required=True)
     conf.check_eigen(required=True)
-    conf.check_torch_kmeans(required=True)
-    conf.recurse("./submodules/kmeans-torch-cpp/")
 
     # We require C++17
     if conf.env.CXX_NAME in ["icc", "icpc"]:
@@ -71,14 +69,13 @@ def configure(conf):
 
 def build(bld):
     # compilation of experiment
-    bld.recurse("./submodules/kmeans-torch-cpp/")
-    libs = "TORCH EIGEN BOOST TORCH_KMEANS"
+    libs = "TORCH EIGEN BOOST"
     path_prefix = bld.path.abspath() + '/'
 
     examples = []
-    export_includes = ["./"]
+    export_includes = [srcdir + "/cpp/"]
 
-    for root, dirs, files in os.walk(bld.path.abspath() + "/examples/"):
+    for root, dirs, files in os.walk(bld.path.abspath() + "/examples/cpp/"):
         for f in files:
             if f.endswith("cpp"):
                 examples.append(f"{root}{f}".replace(path_prefix, ''))
@@ -91,16 +88,15 @@ def build(bld):
                 source=[example],
                 includes=export_includes,
                 uselib=libs,
-                use="torch_kmeans",
                 target=example.split("/")[-1].split(".")[0],
             )
 
     install_files = []
-    for root, dirs, files in os.walk(APPNAME):
+    for root, dirs, files in os.walk(APPNAME + "/cpp"):
         for f in files:
             if f.endswith(".hpp") or f.endswith(".h"):
                 install_files.append(f"{root}/{f}")
 
     for f in install_files:
-        dir_name = "/".join(f.split("/")[:-1])
+        dir_name = "/".join(f.split("/")[2:-1])
         bld.install_files("${PREFIX}/include/" + dir_name, f)
