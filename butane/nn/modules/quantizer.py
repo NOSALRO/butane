@@ -1,5 +1,5 @@
 import torch
-# from torch_kmeans import KMeans
+import butane
 
 class Quantizer(torch.nn.Module):
     def __init__(self, latent_dim, n_centers, device=torch.device('cpu')):
@@ -48,12 +48,12 @@ class Quantizer(torch.nn.Module):
         torch.nn.init.uniform_(self.embedding.weight, low, high)
         self.embedding.weight.requires_grad = True
 
-    # def init_codebook_kmeans(self, low, high):
-    #     rdata = torch.empty(self._n_centers * 400, self._latent_dim, device=self._device).uniform_(low, high)
-    #     kmeans = KMeans(n_clusters=self._n_centers, mode='euclidean', verbose=0)
-    #     kmeans.fit_predict(rdata)
-    #     self.embedding.weight.data = kmeans.centroids
-    #     self.embedding.weight.requires_grad = True
+    def init_codebook_kmeans(self, low, high):
+        rdata = torch.empty(self._n_centers * 400, self._latent_dim, device=self._device).uniform_(low, high)
+        kmeans = butane.clustering.KMeans(n_centroids=self._n_centers, init='kmeans++')
+        kmeans.fit(rdata)
+        self.embedding.weight.data = kmeans.centroids
+        self.embedding.weight.requires_grad = True
 
     def set_beta(self, new_beta):
         self._beta = new_beta

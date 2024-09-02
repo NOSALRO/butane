@@ -28,8 +28,8 @@ class AE(torch.nn.Module):
         for n_batches, batch in enumerate(dl):
             if self.training:
                 optimizer.zero_grad()
-            x_reconstructed = self.forward(batch)
-            loss = loss_fn_(x_reconstructed, batch)
+            x_reconstructed = self.forward(batch.data)
+            loss = loss_fn_(x_reconstructed, batch.data)
             if self.training:
                 loss.backward()
                 optimizer.step()
@@ -76,7 +76,7 @@ class VQVAE(AE):
         for batch in dl:
             if self.training:
                 optimizer.zero_grad()
-            x_reconstructed, quantization_loss = self.forward(batch)
+            x_reconstructed, quantization_loss = self.forward(batch.data)
             loss, loss_rec = loss_fn_(x_reconstructed, batch.data, quantization_loss)
             if (self.training):
                 loss.backward()
@@ -124,8 +124,8 @@ class MLVQVAE(VQVAE):
         for batch in dl:
             if self.training:
                 optimizer.zero_grad()
-            x_reconstructed, x_quantized_reconstructed, quantization_loss = self.forward(batch)
-            loss, loss_ae, loss_vq = loss_fn_(x_reconstructed, x_quantized_reconstructed, batch, quantization_loss)
+            x_reconstructed, x_quantized_reconstructed, quantization_loss = self.forward(batch.data)
+            loss, loss_ae, loss_vq = loss_fn_(x_reconstructed, x_quantized_reconstructed, batch.data, quantization_loss)
             if (self.training):
                 loss.backward()
                 optimizer.step()

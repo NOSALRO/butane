@@ -2,6 +2,7 @@
 *build
 data
 !butane/cpp/butane/data
+!butane/data
 *.lock*
 *.waf*
 .clang*
