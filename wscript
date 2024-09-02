@@ -26,7 +26,6 @@ def options(opt):
     opt.load("boost")
     opt.load("torch")
     opt.load("eigen")
-    # opt.load("torch_kmeans")
     opt.add_option("--examples", default=False, dest='build_examples', action='store_true')
 
 
@@ -37,7 +36,6 @@ def configure(conf):
     conf.load("boost")
     conf.load("torch")
     conf.load("eigen")
-    # conf.load("torch_kmeans")
 
     # we need pthread for video saving
     conf.check_boost(required=True)
