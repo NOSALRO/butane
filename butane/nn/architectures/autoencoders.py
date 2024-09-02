@@ -28,8 +28,8 @@ class AE(torch.nn.Module):
         for n_batches, batch in enumerate(dl):
             if self.training:
                 optimizer.zero_grad()
-            x_reconstructed = self.forward(batch.data)
-            loss = loss_fn_(x_reconstructed, batch.data)
+            x_reconstructed = self.forward(batch["data"])
+            loss = loss_fn_(x_reconstructed, batch["data"])
             if self.training:
                 loss.backward()
                 optimizer.step()
@@ -76,8 +76,8 @@ class VQVAE(AE):
         for batch in dl:
             if self.training:
                 optimizer.zero_grad()
-            x_reconstructed, quantization_loss = self.forward(batch.data)
-            loss, loss_rec = loss_fn_(x_reconstructed, batch.data, quantization_loss)
+            x_reconstructed, quantization_loss = self.forward(batch["data"])
+            loss, loss_rec = loss_fn_(x_reconstructed, batch["data"], quantization_loss)
             if (self.training):
                 loss.backward()
                 optimizer.step()
@@ -105,6 +105,10 @@ class MLVQVAE(VQVAE):
 
         q_z, quantization_loss = self.quantizer(z)
         quantized_reconstructed = self.decoder(q_z)
+
+        # quantized_reconstructed = reconstructed + (quantized_reconstructed - reconstructed).detach()
+        # reconstructed = quantized_reconstructed + (reconstructed - quantized_reconstructed).detach()
+
         return reconstructed, quantized_reconstructed,  quantization_loss
 
     @staticmethod
@@ -124,8 +128,8 @@ class MLVQVAE(VQVAE):
         for batch in dl:
             if self.training:
                 optimizer.zero_grad()
-            x_reconstructed, x_quantized_reconstructed, quantization_loss = self.forward(batch.data)
-            loss, loss_ae, loss_vq = loss_fn_(x_reconstructed, x_quantized_reconstructed, batch.data, quantization_loss)
+            x_reconstructed, x_quantized_reconstructed, quantization_loss = self.forward(batch["data"])
+            loss, loss_ae, loss_vq = loss_fn_(x_reconstructed, x_quantized_reconstructed, batch["data"], quantization_loss)
             if (self.training):
                 loss.backward()
                 optimizer.step()

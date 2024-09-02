@@ -4,16 +4,19 @@ from typing import Optional, List, Tuple
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, data: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None):
         super().__init__()
-        self.data = torch.tensor([]) if data is None else data.clone().float()
-        self.targets = torch.tensor([]) if targets is None else targets.clone()
+        self.data = torch.tensor([]) if data is None else data.detach().clone().float()
+        self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
         self._has_targets = targets is not None
         self._device = torch.device('cpu')
 
     def __getitem__(self, idx):
         if self._has_targets:
-            return self.data[idx], self.targets[idx]
+            return {
+                "data": self.data[idx],
+                "targets": self.targets[idx]
+            }
         else:
-            return self.data[idx]
+            return { "data": self.data[idx] }
 
     def flatten(self, dim: int = 1):
         self.data = self.data.flatten(start_dim=dim)
@@ -30,18 +33,17 @@ class Dataset(torch.utils.data.Dataset):
         if self._has_targets:
             torch.save(self.targets.cpu().detach(), f"{base_path}_targets.pt")
 
-    def set_data(self, data: torch.Tensor):
-        self.data = data.clone()
-
-    def set_targets(self, targets: torch.Tensor):
-        self.targets = targets.clone()
-        self._has_targets = True
+    def set(self, data: torch.Tensor, targets: torch.Tensor = None):
+        self.data = data.detach().clone()
+        if targets:
+            self.targets = targets.detach().clone()
+            self._has_targets = True
 
     def append(self, data: torch.Tensor, targets: Optional[torch.Tensor] = None):
         if self.data.numel() == 0:
-            self.data = data.clone()
+            self.data = data.detach().clone()
         else:
-            tmp_data = data.clone()
+            tmp_data = data.detach().clone()
             if self.data.dim() > tmp_data.dim():
                 tmp_data = tmp_data.unsqueeze(0)
             elif self.data.dim() < tmp_data.dim():
@@ -50,9 +52,9 @@ class Dataset(torch.utils.data.Dataset):
 
         if targets is not None:
             if self.targets.numel() == 0:
-                self.targets = targets.clone()
+                self.targets = targets.detach().clone()
             else:
-                self.targets = torch.cat([self.targets, targets.clone()], dim=0)
+                self.targets = torch.cat([self.targets, targets.detach().clone()], dim=0)
             self._has_targets = True
 
     def sizes(self) -> List[int]:
@@ -69,9 +71,3 @@ class Dataset(torch.utils.data.Dataset):
 
     def targets_ref(self) -> torch.Tensor:
         return self.targets
-
-    def data(self) -> torch.Tensor:
-        return self.data.clone()
-
-    def targets(self) -> torch.Tensor:
-        return self.targets.clone()

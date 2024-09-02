@@ -20,10 +20,10 @@ namespace butane {
 
             Dataset(const torch::Tensor& data, boost::optional<const torch::Tensor&> targets = boost::none)
             {
-                _data = data.clone();
+                _data = data.detach().clone();
                 _data = _data.toType(torch::kFloat32);
                 if (targets) {
-                    _targets = targets.value().clone();
+                    _targets = targets.value().detach().clone();
                     _has_targets = true;
                 }
             }
@@ -75,17 +75,22 @@ namespace butane {
                     torch::save(_targets.clone().cpu().detach(), fpath + "_targets.pt");
             }
 
-            void set_data(const torch::Tensor& data) { _data = data.clone(); }
-
-            void set_targets(const torch::Tensor& targets) { _targets = targets.clone(); }
+            void set(const torch::Tensor& data, boost::optional<const torch::Tensor&> targets = boost::none)
+            {
+                _data = data.detach().clone().to(_device);
+                if (targets) {
+                    _targets = targets.value().detach().clone().to(_device);
+                    _has_targets = true;
+                }
+            }
 
             void append(const torch::Tensor& data, boost::optional<const torch::Tensor&> targets = boost::none)
             {
                 if (_data.sizes()[0] == 0) {
-                    _data = data.clone();
+                    _data = data.detach().clone();
                 }
                 else {
-                    torch::Tensor tmp_data = data.clone();
+                    torch::Tensor tmp_data = data.detach().clone();
                     if (_data.sizes().size() > tmp_data.sizes().size()) {
                         tmp_data = tmp_data.unsqueeze(0);
                     }
@@ -97,9 +102,9 @@ namespace butane {
                 if (targets) {
                     _has_targets = true;
                     if (_targets.numel() == 0)
-                        _targets = targets.value().clone();
+                        _targets = targets.value().detach().clone();
                     else {
-                        torch::Tensor tmp_targets = targets.value().clone();
+                        torch::Tensor tmp_targets = targets.value().detach().clone();
                         _targets = torch::cat({_targets, tmp_targets}, 0);
                     }
                 }
@@ -137,8 +142,8 @@ namespace butane {
 
             torch::Tensor& data_ref() { return _data; }
             torch::Tensor& targets_ref() { return _targets; }
-            torch::Tensor data() { return _data.clone(); }
-            torch::Tensor targets() { return _targets.clone(); }
+            torch::Tensor data() { return _data.detach().clone(); }
+            torch::Tensor targets() { return _targets.detach().clone(); }
 
         protected:
             torch::Tensor _data, _targets;
