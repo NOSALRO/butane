@@ -33,8 +33,8 @@ int main(int argc, char** argv)
 
     ConvTranspose2dBlock<torch::nn::BatchNorm2d, torch::nn::MaxPool2d> c_dec(co_dec);
 
-    torch::nn::Sequential encoder(c_enc, functional::flatten(1), mlp_enc);
-    torch::nn::Sequential decoder(mlp_dec, functional::unflatten(1, c_enc->output_size()), c_dec);
+    torch::nn::Sequential encoder(c_enc, Flatten(1), mlp_enc);
+    torch::nn::Sequential decoder(mlp_dec, Unflatten(1, c_enc->output_size()), c_dec);
     MLVQVAE model(encoder, decoder, quantizer);
     // VQVAE model(encoder, decoder, quantizer);
     // AE model(encoder, decoder);

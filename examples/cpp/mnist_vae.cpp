@@ -40,8 +40,8 @@ int main(int argc, char** argv)
 
     butane::nn::ConvTranspose2dBlock<torch::nn::BatchNorm2d, torch::nn::MaxPool2d> c_dec(co_dec);
 
-    torch::nn::Sequential encoder(c_enc, butane::nn::functional::flatten(1), mlp_enc);
-    torch::nn::Sequential decoder(mlp_dec, butane::nn::functional::unflatten(1, c_enc->output_size()), c_dec);
+    torch::nn::Sequential encoder(c_enc, butane::nn::Flatten(1), mlp_enc);
+    torch::nn::Sequential decoder(mlp_dec, butane::nn::Unflatten(1, c_enc->output_size()), c_dec);
     butane::nn::VAE model(encoder, decoder);
     model->set_beta(10.);
     model->reduction(butane::Sum);

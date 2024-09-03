@@ -26,8 +26,8 @@ int main(int argc, char** argv)
     Quantizer quant(2, 100);
     quant->init_codebook_kmeans(-100, 100);
 
-    torch::nn::Sequential encoder(c_enc, functional::flatten(1), mlp_enc);
-    torch::nn::Sequential decoder(mlp_dec, functional::unflatten(1, con_out_sz), c_dec);
+    torch::nn::Sequential encoder(c_enc, Flatten(1), mlp_enc);
+    torch::nn::Sequential decoder(mlp_dec, Unflatten(1, con_out_sz), c_dec);
 
     VQVAE model(encoder, decoder, quant);
 

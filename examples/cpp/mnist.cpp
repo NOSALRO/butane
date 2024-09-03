@@ -17,7 +17,7 @@ int main(int argc, char** argv)
 
     MLPBlock mlp(c->output_size().prod().item<int>(), 10, std::vector<int64_t>{64, 64}, AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::LogSoftmax(-1)}, true);
 
-    SimpleClassifier model(torch::nn::Sequential{c, functional::flatten(1), mlp});
+    SimpleClassifier model(torch::nn::Sequential{c, Flatten(1), mlp});
     model->to(dev);
     std::cout << model << std::endl;
 

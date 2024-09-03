@@ -120,7 +120,7 @@ namespace butane {
 
             std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
             {
-                if (_has_affince_transform) {
+                if (this->is_training() && _has_affince_transform) {
                     _affine_transform->update_running_statistics(x, embedding->weight);
                     embedding->weight.set_data(_affine_transform->forward(embedding->weight));
                 }
@@ -196,7 +196,7 @@ namespace butane {
                 x = x.permute({0, 2, 3, 1});
                 torch::Tensor x_flat = x.clone().reshape({B * H * W, C});
 
-                if (this->_has_affince_transform) {
+                if (this->_has_affince_transform && this->is_training()) {
                     this->_affine_transform->update_running_statistics(x, this->embedding->weight);
                     this->embedding->weight.set_data(this->_affine_transform->forward(this->embedding->weight));
                 }
@@ -222,7 +222,6 @@ namespace butane {
                         quantized_latents = this->embedding->forward(closest_encoding);
                     }
                 }
-                quantized_latents = quantized_latents.view(x.sizes());
                 quantized_latents = quantized_latents.view(x.sizes());
 
                 torch::Tensor commitment_loss = (quantized_latents.detach() - x).pow(2);

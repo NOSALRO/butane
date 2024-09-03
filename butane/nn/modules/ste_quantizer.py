@@ -119,7 +119,7 @@ class STEQuantizer(Quantizer):
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        if self.affine_transform is not None:
+        if self.affine_transform is not None and self.training:
             self.affine_transform.update_running_statistics(x, self.embedding.weight)
             self.embedding.weight.data = self.affine_transform(self.embedding.weight)
             self.embedding.weight.data = self.embedding.weight.data.to(x.device)
@@ -195,7 +195,7 @@ class STEQuantizer2d(STEQuantizer):
         x = x.permute(0, 2, 3, 1)
         x_flat = x.reshape(B * H * W, C)
 
-        if self.affine_transform is not None:
+        if self.affine_transform is not None and self.training:
             self.affine_transform.update_running_statistics(x, self.embedding.weight)
             self.embedding.weight.data = self.affine_transform(self.embedding.weight)
             self.embedding.weight.data = self.embedding.weight.data.to(x.device)
