@@ -1,15 +1,22 @@
+from typing import Optional
 import torch
 
 class KMeans:
 
-    def __init__(self, n_centroids, init = 'kmeans++', random_state = -1, tol = 1e-8):
+    def __init__(
+        self,
+        n_centroids: int,
+        init: Optional[str] = 'kmeans++',
+        random_state: Optional[int] = -1,
+        tol: Optional[float] = 1e-8
+    ) -> None:
         self.n_centroids = n_centroids
         self.init = init
         self.tol = tol
         self.centroids = None
         torch.random.manual_seed(random_state)
 
-    def fit(self, x):
+    def fit(self, x: torch.Tensor) -> None:
         if self.init == 'kmeans++':
             self.__plusplus(x)
         else:
@@ -25,7 +32,7 @@ class KMeans:
             for j in torch.arange(self.n_centroids):
                 self.centroids[j] = x[closest == j].mean(0)
 
-    def __plusplus(self, x):
+    def __plusplus(self, x: torch.Tensor) -> None:
         centroid_idx = torch.randint(len(x), size=(1,), dtype=torch.int32)
         self.centroids = x[centroid_idx]
 

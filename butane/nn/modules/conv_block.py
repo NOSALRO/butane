@@ -1,48 +1,30 @@
+from typing import TypeAlias, Union, Optional, List
 import math
 import copy
-from typing import TypeAlias, Union, Optional
 import torch
-import numpy as np
 from .._typedefs import *
-
-def ConvDef(conv_type, transpose=False):
-    def inner(cls):
-        if conv_type == '1d':
-            cls.conv = torch.nn.Conv1d if not transpose else torch.nn.ConvTranspose1d
-            cls.pool = torch.nn.MaxPool1d
-            cls.norm_type = torch.nn.BatchNorm1d
-        elif conv_type == '2d':
-            cls.conv = torch.nn.Conv2d if not transpose else torch.nn.ConvTranspose2d
-            cls.pool = torch.nn.MaxPool2d
-            cls.norm_type = torch.nn.BatchNorm2d
-        elif conv_type == '3d':
-            cls.conv = torch.nn.Conv3d if not transpose else torch.nn.ConvTranspose3d
-            cls.pool = torch.nn.MaxPool3d
-            cls.norm_type = torch.nn.BatchNorm3d
-        return cls
-    return inner
-
+from .._helpers import _fill_defaults, conv_def, _prod
 
 class ConvBlock(torch.nn.Module):
 
     def __init__(
         self,
         input_dims: IntParams,
-        channels: IntParams = [32, 64],
+        channels: IntParams = [32],
         *,
-        activation_function: ModuleParams = None,
-        conv_kernels: IntParams = None,
-        conv_stride: IntParams = None,
-        conv_pad: IntParams = None,
-        conv_bias: BoolParams = True,
-        conv_pad_mode: Optional[str] = 'zeros',
+        activation_function: ModuleParams = [torch.nn.ReLU],
+        conv_kernels: IntParams = [3],
+        conv_stride: IntParams = [1],
+        conv_pad: IntParams = [0],
+        conv_bias: BoolParams = [True],
+        conv_pad_mode: Optional[StrParams] = ['zeros'],
         pool: Optional[torch.nn.Module] = None,
-        pool_kernels: IntParams = None,
-        pool_stride: IntParams = None,
-        pool_pad: IntParams = None,
-        dropout: FloatParams = None,
+        pool_kernels: IntParams = [0],
+        pool_stride: IntParams = [1],
+        pool_pad: IntParams = [0],
+        dropout: FloatParams = [0.],
         output_activation: Optional[bool] = False,
-        normalization: BoolParams = False,
+        normalization: BoolParams = [False],
         normalization_type: Optional[torch.nn.Module] = None
     ) -> None:
 
@@ -54,35 +36,17 @@ class ConvBlock(torch.nn.Module):
         if normalization_type is not None:
             self.norm_type = normalization_type
 
-        if activation_function is None:
-            activation_function = [torch.nn.ReLU() for _ in range(len(channels))]
-
-        if conv_kernels is None:
-            conv_kernels = [3 for _ in range(len(channels))]
-
-        if conv_stride is None:
-            conv_stride = [1 for _ in range(len(channels))]
-
-        if conv_pad is None:
-            conv_pad = [0 for _ in range(len(channels))]
-
-        if pool_kernels is None:
-            pool_kernels = [0 for _ in range(len(channels))]
-
-        if pool_stride is None:
-            pool_stride = [1 for _ in range(len(channels))]
-
-        if pool_pad is None:
-            pool_pad = [0 for _ in range(len(channels))]
-
-        if dropout is None:
-            dropout = [0. for _ in range(len(channels))]
-
-        if isinstance(normalization, bool):
-            normalization = [normalization for _ in range(len(channels))]
-
-        if isinstance(conv_bias, bool):
-            conv_bias = [conv_bias for _ in range(len(channels))]
+        conv_bias = _fill_defaults(conv_bias, len(channels))
+        activation_function = _fill_defaults(activation_function, len(channels))
+        conv_kernels = _fill_defaults(conv_kernels, len(channels), self.N)
+        conv_stride = _fill_defaults(conv_stride, len(channels), self.N)
+        conv_pad = _fill_defaults(conv_pad, len(channels), self.N)
+        conv_pad_mode = _fill_defaults(conv_pad_mode, len(channels))
+        pool_kernels = _fill_defaults(pool_kernels, len(channels), self.N)
+        pool_stride = _fill_defaults(pool_stride, len(channels), self.N)
+        pool_pad = _fill_defaults(pool_pad, len(channels), self.N)
+        dropout = _fill_defaults(dropout, len(channels))
+        normalization = _fill_defaults(normalization, len(channels))
 
         # Check if we are set to build our model
         assert (
@@ -97,8 +61,6 @@ class ConvBlock(torch.nn.Module):
             and len(pool_pad) == len(dropout)
             and len(dropout) == len(normalization)
         ), "Params size must be the same!"
-
-        # assert (output_activation is None or isinstance(output_activation, torch.nn.Module)), "Ouput actviation function must be a torch.nn.Module"
 
         super().__init__()
 
@@ -115,7 +77,7 @@ class ConvBlock(torch.nn.Module):
                     conv_stride[i],
                     conv_pad[i],
                     conv_bias[i],
-                    conv_pad_mode,
+                    conv_pad_mode[i],
                     pool_kernels[i],
                     pool_stride[i],
                     pool_pad[i],
@@ -129,7 +91,7 @@ class ConvBlock(torch.nn.Module):
         return self.conv_block(x)
 
     @property
-    def output_size(self):
+    def output_size(self) -> torch.Tensor:
         self.eval()
         sz = None
         with torch.no_grad():
@@ -138,7 +100,7 @@ class ConvBlock(torch.nn.Module):
         return sz
 
     @staticmethod
-    def __component_output_sz(component, input_dim):
+    def __component_output_sz(component: torch.nn.Module, input_dim: List[int]) -> torch.Tensor:
         component.eval()
         with torch.no_grad():
             sz = torch.tensor(component(torch.rand(1, *input_dim)).size())
@@ -158,13 +120,13 @@ class ConvBlock(torch.nn.Module):
         pool_stride: int,
         pool_pad: int,
         dropout: float,
-        af: Optional[torch.nn.Module] = None,
-        norm: Optional[bool] = False,
-        norm_type: Optional[torch.nn.Module] = torch.nn.BatchNorm1d
-    ) -> list:
+        af: torch.nn.Module,
+        norm: bool,
+        norm_type: torch.nn.Module,
+    ) -> List[torch.nn.Module]:
         ret = []
         conv = self.conv(in_channels, out_channels, kernel_size=conv_kernel, stride=conv_stride, padding=conv_pad, padding_mode=conv_pad_mode, bias=conv_bias)
-        pool = self.pool(pool_kernel, stride = pool_stride, padding = pool_pad) if np.prod(pool_kernel) != 0 else None
+        pool = self.pool(pool_kernel, stride = pool_stride, padding = pool_pad) if _prod(pool_kernel) != 0 else None
         drop = torch.nn.Dropout(dropout) if dropout != 0 else None
         if norm_type.__name__ == "LayerNorm":
             norm_layer = norm_type(list(self.__component_output_sz(conv, self.output_size[1:])[1:]))
@@ -188,20 +150,20 @@ class ConvTransposeBlock(torch.nn.Module):
         input_dims: IntParams,
         channels: IntParams = [32, 64],
         *,
-        activation_function: ModuleParams = None,
-        conv_kernels: IntParams = None,
-        conv_stride: IntParams = None,
-        conv_pad: IntParams = None,
-        conv_bias: BoolParams = True,
-        conv_output_padding: IntParams = None,
+        activation_function: ModuleParams = [torch.nn.ReLU],
+        conv_kernels: IntParams = [3],
+        conv_stride: IntParams = [1],
+        conv_pad: IntParams = [0],
+        conv_bias: BoolParams = [True],
+        conv_output_padding: IntParams = [0],
         pool: Optional[torch.nn.Module] = None,
-        pool_kernels: IntParams = None,
-        pool_stride: IntParams = None,
-        pool_pad: IntParams = None,
-        dropout: FloatParams = None,
+        pool_kernels: IntParams = [0],
+        pool_stride: IntParams = [1],
+        pool_pad: IntParams = [0],
+        dropout: FloatParams = [0],
         output_activation: Optional[bool] = False,
-        normalization: BoolParams = False,
-        normalization_type: Optional[torch.nn.Module] = torch.nn.BatchNorm1d
+        normalization: BoolParams = [False],
+        normalization_type: Optional[torch.nn.Module] = None
     ) -> None:
 
         # Initialize default args.
@@ -212,38 +174,18 @@ class ConvTransposeBlock(torch.nn.Module):
         if normalization_type is not None:
             self.norm_type = normalization_type
 
-        if activation_function is None:
-            activation_function = [torch.nn.ReLU() for _ in range(len(channels))]
+        activation_function = _fill_defaults(activation_function, len(channels))
+        conv_kernels = _fill_defaults(conv_kernels, len(channels), self.N)
+        conv_stride = _fill_defaults(conv_stride, len(channels), self.N)
+        conv_pad = _fill_defaults(conv_pad, len(channels), self.N)
+        conv_output_padding = _fill_defaults(conv_output_padding, len(channels), self.N)
+        pool_kernels = _fill_defaults(pool_kernels, len(channels), self.N)
+        pool_stride = _fill_defaults(pool_stride, len(channels), self.N)
+        pool_pad = _fill_defaults(pool_pad, len(channels), self.N)
+        dropout = _fill_defaults(dropout, len(channels))
+        normalization = _fill_defaults(normalization, len(channels))
+        conv_bias = _fill_defaults(conv_bias, len(channels))
 
-        if conv_kernels is None:
-            conv_kernels = [3 for _ in range(len(channels))]
-
-        if conv_stride is None:
-            conv_stride = [1 for _ in range(len(channels))]
-
-        if conv_pad is None:
-            conv_pad = [0 for _ in range(len(channels))]
-
-        if conv_output_padding is None:
-            conv_output_padding = [0 for _ in range(len(channels))]
-
-        if pool_kernels is None:
-            pool_kernels = [0 for _ in range(len(channels))]
-
-        if pool_stride is None:
-            pool_stride = [1 for _ in range(len(channels))]
-
-        if pool_pad is None:
-            pool_pad = [0 for _ in range(len(channels))]
-
-        if dropout is None:
-            dropout = [0. for _ in range(len(channels))]
-
-        if isinstance(normalization, bool):
-            normalization = [normalization for _ in range(len(channels))]
-
-        if isinstance(conv_bias, bool):
-            conv_bias = [conv_bias for _ in range(len(channels))]
 
         # Check if we are set to build our model
         assert (
@@ -258,8 +200,6 @@ class ConvTransposeBlock(torch.nn.Module):
             and len(pool_pad) == len(dropout)
             and len(dropout) == len(normalization)
         ), "Params size must be the same!"
-
-        # assert (output_activation is None or isinstance(output_activation, torch.nn.Module)), "Ouput actviation function must be a torch.nn.Module"
 
         super().__init__()
 
@@ -291,7 +231,7 @@ class ConvTransposeBlock(torch.nn.Module):
         return self.conv_transpose_block(x)
 
     @property
-    def output_size(self):
+    def output_size(self) -> torch.Tensor:
         self.eval()
         sz = None
         with torch.no_grad():
@@ -300,7 +240,7 @@ class ConvTransposeBlock(torch.nn.Module):
         return sz
 
     @staticmethod
-    def __component_output_sz(component, input_dim):
+    def __component_output_sz(component: torch.nn.Module, input_dim: List[int]) -> torch.Tensor:
         component.eval()
         with torch.no_grad():
             sz = torch.tensor(component(torch.rand(1, *input_dim)).size())
@@ -320,20 +260,20 @@ class ConvTransposeBlock(torch.nn.Module):
         pool_stride: int,
         pool_pad: int,
         dropout: float,
-        af: Optional[torch.nn.Module] = None,
-        norm: Optional[bool] = False,
-        norm_type: Optional[torch.nn.Module] = torch.nn.BatchNorm1d
-    ) -> list:
+        af: Optional[torch.nn.Module],
+        norm: bool,
+        norm_type: torch.nn.Module
+    ) -> List[torch.nn.Module]:
         ret = []
         conv = self.conv(in_channels, out_channels, kernel_size=conv_kernel, stride=conv_stride, padding=conv_pad, output_padding=conv_out_pad, bias=conv_bias)
-        pool = self.pool(pool_kernel, stride = pool_stride, padding = pool_pad) if np.prod(pool_kernel) != 0 else None
+        pool = self.pool(pool_kernel, stride = pool_stride, padding = pool_pad) if _prod(pool_kernel) != 0 else None
         drop = torch.nn.Dropout(dropout) if dropout != 0 else None
-        if norm_type.__name__ == "LayerNorm":
-            norm_layer = norm_type(list(self.__component_output_sz(conv, self.output_size[1:])[1:]))
-        else:
-            norm_layer = norm_type(out_channels)
         ret.append(conv)
         if norm:
+            if norm_type.__name__ == "LayerNorm":
+                norm_layer = norm_type(list(self.__component_output_sz(conv, self.output_size[1:])[1:]))
+            else:
+                norm_layer = norm_type(out_channels)
             ret.append(norm_layer)
         if af is not None:
             ret.append(af)
@@ -343,20 +283,20 @@ class ConvTransposeBlock(torch.nn.Module):
             ret.append(drop)
         return ret
 
-@ConvDef('1d')
+@conv_def('1d')
 class Conv1dBlock(ConvBlock): ...
 
-@ConvDef('1d', True)
+@conv_def('1d', True)
 class ConvTranspose1dBlock(ConvTransposeBlock): ...
 
-@ConvDef('2d')
+@conv_def('2d')
 class Conv2dBlock(ConvBlock): ...
 
-@ConvDef('2d', True)
+@conv_def('2d', True)
 class ConvTranspose2dBlock(ConvTransposeBlock): ...
 
-@ConvDef('3d')
+@conv_def('3d')
 class Conv3dBlock(ConvBlock): ...
 
-@ConvDef('3d', True)
+@conv_def('3d', True)
 class ConvTranspose3dBlock(ConvTransposeBlock): ...

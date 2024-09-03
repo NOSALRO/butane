@@ -1,28 +1,35 @@
+from typing import Optional, Callable, Tuple
 import torch
 
 class AE(torch.nn.Module):
 
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder: torch.nn.Module, decoder: torch.nn.Module) -> None:
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         z = self.encoder(x)
         reconstructed = self.decoder(z)
         return reconstructed
 
-    def encode(self, x):
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
         return self.encoder(x)
 
-    def decode(self, x):
+    def decode(self, x: torch.Tensor) -> torch.Tensor:
         return self.decoder(x)
 
     @staticmethod
-    def loss_fn(x_hat, x):
+    def loss_fn(x_hat: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return torch.nn.functional.mse_loss(x_hat, x)
 
-    def step(self, dl, optimizer, loss_fn_ = loss_fn, scheduler = None):
+    def step(
+        self,
+        dl: torch.utils.data.DataLoader,
+        optimizer: torch.optim.Optimizer,
+        loss_fn_: Optional[Callable[[torch.Tensor, ...], Tuple[torch.Tensor,...]]] = loss_fn,
+        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
+    ) -> None:
         sum_loss = 0.
         n_batches = len(dl)
         for n_batches, batch in enumerate(dl):
@@ -43,31 +50,37 @@ class AE(torch.nn.Module):
 
 class VQVAE(AE):
 
-    def __init__(self, encoder, decoder, quantizer):
+    def __init__(self, encoder: torch.nn.Module, decoder: torch.nn.Module, quantizer: torch.nn.Module) -> None:
         super().__init__(encoder, decoder)
         self.quantizer = quantizer
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         z = self.encoder(x)
         q_z, quantization_loss = self.quantizer(z)
         reconstructed = self.decoder(q_z)
         return reconstructed, quantization_loss
 
-    def quantize(self, x):
+    def quantize(self, x: torch.Tensor) -> torch.Tensor:
         z = self.encoder(x)
         q_z, _ = self.quantizer(z)
         return q_z
 
-    def centers(self):
+    def centers(self) -> torch.Tensor:
         return self.quantizer.centers()
 
     @staticmethod
-    def loss_fn(x_hat, x, vq_loss):
+    def loss_fn(x_hat, x, vq_loss) -> Tuple[torch.Tensor,...]:
         x_rec = torch.nn.functional.mse_loss(x_hat, x)
         loss = x_rec + vq_loss
         return loss, x_rec
 
-    def step(self, dl, optimizer, loss_fn_ = loss_fn, scheduler = None):
+    def step(
+        self,
+        dl: torch.utils.data.DataLoader,
+        optimizer: torch.optim.Optimizer,
+        loss_fn_: Optional[Callable[[torch.Tensor, ...], Tuple[torch.Tensor,...]]] = loss_fn,
+        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
+    ) -> None:
         sum_loss = 0.
         sum_quantization_loss = 0.
         sum_loss_rec = 0.
@@ -96,29 +109,32 @@ class VQVAE(AE):
 
 class MLVQVAE(VQVAE):
 
-    def __init__(self, encoder, decoder, quantizer):
+    def __init__(self, encoder: torch.nn.Module, decoder: torch.nn.Module, quantizer: torch.nn.Module) -> None:
         super().__init__(encoder, decoder, quantizer)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         z = self.encoder(x)
         reconstructed = self.decoder(z)
 
         q_z, quantization_loss = self.quantizer(z)
         quantized_reconstructed = self.decoder(q_z)
 
-        # quantized_reconstructed = reconstructed + (quantized_reconstructed - reconstructed).detach()
-        # reconstructed = quantized_reconstructed + (reconstructed - quantized_reconstructed).detach()
-
         return reconstructed, quantized_reconstructed,  quantization_loss
 
     @staticmethod
-    def loss_fn(x_hat, x_quantized_hat, x, vq_loss):
+    def loss_fn(x_hat, x_quantized_hat, x, vq_loss) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x_rec = torch.nn.functional.mse_loss(x_hat, x)
         x_rec_quantized = torch.nn.functional.mse_loss(x_quantized_hat, x)
         loss = x_rec + x_rec_quantized + vq_loss
         return loss, x_rec, x_rec_quantized
 
-    def step(self, dl, optimizer, loss_fn_ = loss_fn, scheduler = None):
+    def step(
+        self,
+        dl: torch.utils.data.DataLoader,
+        optimizer: torch.optim.Optimizer,
+        loss_fn_: Optional[Callable[[torch.Tensor, ...], Tuple[torch.Tensor,...]]] = loss_fn,
+        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
+    ) -> None:
         sum_loss = 0.
         sum_quantization_loss = 0.
         sum_loss_ae = 0.

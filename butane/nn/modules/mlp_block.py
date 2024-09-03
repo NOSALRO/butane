@@ -1,9 +1,9 @@
+from typing import TypeAlias, Union, Optional
 import math
 import copy
-from typing import TypeAlias, Union, Optional
 import torch
 from .._typedefs import *
-from .._utils import _fill_defaults
+from .._helpers import _fill_defaults
 
 class MLPBlock(torch.nn.Sequential):
 
@@ -11,8 +11,8 @@ class MLPBlock(torch.nn.Sequential):
         self,
         input_dims: Optional[int] = None,
         output_dims: Optional[int] = None,
-        hidden_dims: Optional[Description] = None,
-        activation_function: Optional[ModuleParams] = None,
+        hidden_dims: Optional[IntParams] = None,
+        activation_function: Optional[ModuleParams] = [torch.nn.ReLU()],
         output_activation: Optional[bool] = False,
         bias: Optional[BoolParams] = [True],
         dropout: Optional[float] = [0.0],
@@ -29,6 +29,7 @@ class MLPBlock(torch.nn.Sequential):
         _hidden_dims.insert(0, input_dims)
         _hidden_dims.insert(len(hidden_dims) + 1, output_dims)
         n_layers = len(_hidden_dims) - 1
+        activation_function = _fill_defaults(activation_function, n_layers)
         bias = _fill_defaults(bias, n_layers)
         dropout = _fill_defaults(dropout, n_layers)
 
@@ -56,10 +57,10 @@ class ProbabilisticMLPBlock(torch.nn.Sequential):
 
     def __init__(
         self,
-        input_dims: Optional[int] = None,
-        output_dims: Optional[int] = None,
-        hidden_dims: Optional[Description] = None,
-        activation_function: Optional[ModuleParams] = None,
+        input_dims: int = None,
+        output_dims: int = None,
+        hidden_dims: IntParams = None,
+        activation_function: Optional[ModuleParams] = [torch.nn.ReLU()],
         output_activation: Optional[bool] = False,
         bias: Optional[BoolParams] = [True],
         dropout: Optional[float] = [0.0],
@@ -74,6 +75,7 @@ class ProbabilisticMLPBlock(torch.nn.Sequential):
         _hidden_dims.insert(0, input_dims)
         _hidden_dims.insert(len(hidden_dims) + 1, output_dims)
         n_layers = len(_hidden_dims) - 1
+        activation_function = _fill_defaults(activation_function, n_layers)
         bias = _fill_defaults(bias, n_layers)
         dropout = _fill_defaults(dropout, n_layers)
 

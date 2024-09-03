@@ -1,15 +1,15 @@
+from typing import Optional, List, Tuple, Dict
 import torch
-from typing import Optional, List, Tuple
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, data: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None):
+    def __init__(self, data: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> None:
         super().__init__()
         self.data = torch.tensor([]) if data is None else data.detach().clone().float()
         self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
         self._has_targets = targets is not None
         self._device = torch.device('cpu')
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         if self._has_targets:
             return {
                 "data": self.data[idx],
@@ -18,28 +18,28 @@ class Dataset(torch.utils.data.Dataset):
         else:
             return { "data": self.data[idx] }
 
-    def flatten(self, dim: int = 1):
+    def flatten(self, dim: int = 1) -> None:
         self.data = self.data.flatten(start_dim=dim)
 
-    def to(self, device: torch.device):
+    def to(self, device: torch.device) -> None:
         self.data = self.data.to(device)
         if self._has_targets:
             self.targets = self.targets.to(device)
         self._device = device
 
-    def save(self, filepath: str):
+    def save(self, filepath: str) -> None:
         base_path = filepath.rsplit('.', 1)[0]
         torch.save(self.data.cpu().detach(), f"{base_path}_data.pt")
         if self._has_targets:
             torch.save(self.targets.cpu().detach(), f"{base_path}_targets.pt")
 
-    def set(self, data: torch.Tensor, targets: torch.Tensor = None):
+    def set(self, data: torch.Tensor, targets: torch.Tensor = None) -> None:
         self.data = data.detach().clone()
         if targets:
             self.targets = targets.detach().clone()
             self._has_targets = True
 
-    def append(self, data: torch.Tensor, targets: Optional[torch.Tensor] = None):
+    def append(self, data: torch.Tensor, targets: Optional[torch.Tensor] = None) -> None:
         if self.data.numel() == 0:
             self.data = data.detach().clone()
         else:

@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 import butane
 
@@ -85,8 +86,8 @@ class AffineTransform(torch.nn.Module):
 		return scale.unsqueeze(1), bias.unsqueeze(1)
 
 class Quantizer(torch.nn.Module):
-    def __init__(self, latent_dim, n_centers, device=torch.device('cpu')):
-        super(Quantizer, self).__init__()
+    def __init__(self, latent_dim: int, n_centers: int, device: torch.device = torch.device('cpu')) -> None:
+        super().__init__()
         self._latent_dim = latent_dim
         self._n_centers = n_centers
         self._device = device
@@ -105,7 +106,7 @@ class Quantizer(torch.nn.Module):
             )
         self.inplace_codebook_optimizer = torch.optim.AdamW(self.embedding.parameters())
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # Compute distances between inputs and embeddings
 
         self.affine_transform.update_running_statistics(x, self.embedding.weight)
@@ -148,35 +149,39 @@ class Quantizer(torch.nn.Module):
 
         return quantized_latents, quantization_loss
 
-    def init_codebook(self, low, high):
+    def init_codebook(self, low: float, high: float) -> None:
         torch.nn.init.uniform_(self.embedding.weight, low, high)
         self.embedding.weight.requires_grad = True
 
-    def init_codebook_kmeans(self, low, high):
+    def init_codebook_kmeans(self, low: float, high: float) -> None:
         rdata = torch.empty(self._n_centers * 400, self._latent_dim, device=self._device).uniform_(low, high)
         kmeans = butane.clustering.KMeans(n_centroids=self._n_centers, init='kmeans++')
         kmeans.fit(rdata)
         self.embedding.weight.data = kmeans.centroids
         self.embedding.weight.requires_grad = True
 
-    def set_beta(self, new_beta):
+    def set_beta(self, new_beta: float) -> None:
         self._beta = new_beta
 
-    def set_reduction(self, reduction):
+    def set_reduction(self, reduction: str) -> None:
         if reduction in ['mean', 'sum']:
             self._reduction = reduction
         else:
             raise ValueError("Reduction must be 'mean' or 'sum'")
 
-    def centers(self):
+    def centers(self) -> torch.Tensor:
         return self.embedding.weight
 
-    def beta(self):
+    def beta(self) -> float:
         return self._beta
 
 
 class Quantizer2d(Quantizer):
-    def forward(self, x):
+
+    def __init__(self, latent_dim: int, n_centers: int, device: torch.device = torch.device('cpu')) -> None:
+        super().__init__(latent_dim, n_centers, device)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         B, C, H, W = x.size()
         x = x.permute(0, 2, 3, 1).reshape(B * H * W, C)
 
