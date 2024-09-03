@@ -13,6 +13,7 @@
 #include "modules/conv_block.hpp"
 #include "modules/mlp_block.hpp"
 #include "modules/quantizer.hpp"
+#include "modules/ste_quantizer.hpp"
 #include "architectures/autoencoders.hpp"
 #include "utils/model_wrapper.hpp"
 #include "utils/trainer.hpp"

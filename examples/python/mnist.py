@@ -44,8 +44,8 @@ if __name__ == "__main__":
         output_activation = False,
         normalization = [False, False])
 
-    quantizer = butane.nn.Quantizer (2, 100, dev)
-    quantizer.set_beta(.25)
+    quantizer = butane.nn.STEQuantizer(2, 100, affine_lr=1.5, sync_nu=2.0, optimizer=torch.optim.Adam, device=dev)
+    quantizer.set_beta(1.)
     quantizer.init_codebook_kmeans(-1./100., 1./100.)
 
     encoder = torch.nn.Sequential(c_enc, torch.nn.Flatten(1), mlp_enc)

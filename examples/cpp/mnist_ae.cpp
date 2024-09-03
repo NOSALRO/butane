@@ -16,8 +16,8 @@ int main(int argc, char** argv)
 
     butane::nn::MLPBlock mlp_enc(c_enc->output_size().prod().item<int>(), 100, std::vector<int64_t>{64, 64}, butane::nn::AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::Tanh()}, false);
 
-    butane::nn::Quantizer quantizer(100, 10, dev);
-    quantizer->set_beta(1.25);
+    butane::nn::STEQuantizer<torch::optim::AdamW> quantizer(100, 10, dev, 1.5, 2.0, 1);
+    quantizer->set_beta(.25);
     quantizer->init_codebook_kmeans(-.3, .3);
 
     butane::nn::MLPBlock mlp_dec(100, c_enc->output_size().prod().item<int>(), std::vector<int64_t>{64, 64}, butane::nn::AnyModuleList{torch::nn::ReLU(), torch::nn::ReLU(), torch::nn::ReLU()}, false);

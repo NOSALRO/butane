@@ -23,15 +23,15 @@ namespace butane {
 
             std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
             {
-                torch::Tensor quantized_latents;
-                torch::Tensor distance = torch::cdist(x, embedding->weight);
-                torch::Tensor closest_encoding = torch::argmin(distance, -1).unsqueeze(1);
-
-                torch::Tensor encoding_one_hot = torch::zeros({closest_encoding.sizes()[0], _n_centers}, torch::TensorOptions().dtype(torch::kFloat32)).to(x.device());
-                encoding_one_hot = encoding_one_hot.scatter_(1, closest_encoding, 1);
-
-                quantized_latents = torch::matmul(encoding_one_hot, embedding->weight);
-                quantized_latents = quantized_latents.view(x.sizes());
+                torch::Tensor quantized_latents, closest_encoding;
+                {
+                    torch::NoGradGuard no_grad;
+                    torch::Tensor distance = torch::sum(x.pow(2), 1, true) + \
+                            torch::sum(embedding->weight.pow(2), 1) - \
+                            2 * torch::matmul(x, embedding->weight.t());
+                    closest_encoding = torch::argmin(distance, -1).squeeze();
+                }
+                quantized_latents = embedding->forward(closest_encoding);
 
                 torch::Tensor commitment_loss = (quantized_latents.detach() - x).pow(2);
                 torch::Tensor embedding_loss = (quantized_latents - x.detach()).pow(2);
@@ -41,9 +41,9 @@ namespace butane {
                 case Sum:
                     commitment_loss = commitment_loss.sum(), embedding_loss = embedding_loss.sum();
                 }
+                torch::Tensor quantization_loss = _beta * commitment_loss + embedding_loss;
 
                 // Backprop trick. latent - latents = 0 however gradients are copied.
-                torch::Tensor quantization_loss = _beta * commitment_loss + embedding_loss;
                 quantized_latents = x + (quantized_latents - x).detach();
                 return {quantized_latents, quantization_loss};
             }
@@ -100,31 +100,32 @@ namespace butane {
             std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
             {
                 int B = x.size(0), C = x.size(1), H = x.size(2), W = x.size(3);
-                x = x.permute({0, 2, 3, 1}).reshape({B * H * W, C});
-                torch::Tensor quantized_latents;
-                torch::Tensor distance = torch::cdist(x, embedding->weight);
-                torch::Tensor closest_encoding = torch::argmin(distance, -1).unsqueeze(1);
+                x = x.permute({0, 2, 3, 1});
+                torch::Tensor x_flat = x.clone().reshape({B * H * W, C});
 
-                torch::Tensor encoding_one_hot = torch::zeros({closest_encoding.sizes()[0], _n_centers}, torch::TensorOptions().dtype(torch::kFloat32)).to(x.device());
-                encoding_one_hot = encoding_one_hot.scatter_(1, closest_encoding, 1);
-
-                quantized_latents = torch::matmul(encoding_one_hot, embedding->weight);
+                torch::Tensor quantized_latents, closest_encoding;
+                {
+                    torch::NoGradGuard no_grad;
+                    torch::Tensor distance = torch::sum(x_flat.pow(2), 1, true) + \
+                            torch::sum(embedding->weight.pow(2), 1) - \
+                            2 * torch::matmul(x_flat, embedding->weight.t());
+                    closest_encoding = torch::argmin(distance, -1).squeeze();
+                }
+                quantized_latents = embedding->forward(closest_encoding);
                 quantized_latents = quantized_latents.view(x.sizes());
 
                 torch::Tensor commitment_loss = (quantized_latents.detach() - x).pow(2);
                 torch::Tensor embedding_loss = (quantized_latents - x.detach()).pow(2);
-
                 switch (_reduction) {
                 case Mean:
                     commitment_loss = commitment_loss.mean(), embedding_loss = embedding_loss.mean();
                 case Sum:
                     commitment_loss = commitment_loss.sum(), embedding_loss = embedding_loss.sum();
                 }
+                torch::Tensor quantization_loss = _beta * commitment_loss + embedding_loss;
 
                 // Backprop trick. latent - latents = 0 however gradients are copied.
-                torch::Tensor quantization_loss = _beta * commitment_loss + embedding_loss;
                 quantized_latents = x + (quantized_latents - x).detach();
-                quantized_latents = quantized_latents.reshape({B, H, W, C});
                 quantized_latents = quantized_latents.permute({0, 3, 1, 2});
                 return {quantized_latents, quantization_loss};
             }
