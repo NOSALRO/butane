@@ -2,88 +2,101 @@ from typing import Tuple, Optional
 import torch
 from .quantizer import Quantizer
 
+# Implementation of VQ-STE++ https://proceedings.mlr.press/v202/huh23a/huh23a.pdf
 class AffineTransform(torch.nn.Module):
-	def __init__(
-			self,
-			feature_size,
-			use_running_statistics=False,
-			momentum=0.1,
-			lr_scale=1,
-			num_groups=1,
-			):
-		super().__init__()
+    def __init__(
+            self,
+            feature_size: int,
+            use_running_statistics: Optional[bool] = False,
+            momentum: Optional[float] = 0.1,
+            lr_scale: Optional[float] = 1.,
+            num_groups: Optional[int] = 1,
+        ) -> None:
+        super().__init__()
 
-		self.use_running_statistics = use_running_statistics
-		self.num_groups = num_groups
+        self._use_running_statistics = use_running_statistics
+        self._num_groups = num_groups
+        self._lr_scale = lr_scale
+        self._momentum = momentum
+        self._feature_size = feature_size
 
-		if use_running_statistics:
-			self.momentum = momentum
-			self.register_buffer('running_statistics_initialized', torch.zeros(1))
-			self.register_buffer('running_ze_mean', torch.zeros(num_groups, feature_size))
-			self.register_buffer('running_ze_var', torch.ones(num_groups, feature_size))
+        if use_running_statistics:
+            self.register_buffer('_running_statistics_initialized', torch.zeros(1))
+            self.register_buffer('_running_ze_mean', torch.zeros(self._num_groups, self._feature_size))
+            self.register_buffer('_running_ze_var', torch.ones(self._num_groups, self._feature_size))
 
-			self.register_buffer('running_c_mean', torch.zeros(num_groups, feature_size))
-			self.register_buffer('running_c_var', torch.ones(num_groups, feature_size))
-		else:
-			self.scale = torch.nn.parameter.Parameter(torch.zeros(num_groups, feature_size))
-			self.bias = torch.nn.parameter.Parameter(torch.zeros(num_groups, feature_size))
-			self.lr_scale = lr_scale
-		return
+            self.register_buffer('_running_c_mean', torch.zeros(self._num_groups, self._feature_size))
+            self.register_buffer('_running_c_var', torch.ones(self._num_groups, self._feature_size))
+        else:
+            self._scale = torch.nn.parameter.Parameter(torch.zeros(self._num_groups, self._feature_size))
+            self._bias = torch.nn.parameter.Parameter(torch.zeros(self._num_groups, self._feature_size))
 
-	@torch.no_grad()
-	def update_running_statistics(self, z_e, c):
-		# we find it helpful to often to make an under-estimation on the
-		# z_e embedding statistics. Empirically we observe a slight
-		# over-estimation of the statistics, causing the straight-through
-		# estimation to grow indefinitely. While this is not an issue
-		# for most model architecture, some model architectures that don't
-		# have normalized bottlenecks, can cause it to eventually explode.
-        # placing the VQ layer in certain layers of ViT exhibits this behavior
+    @torch.no_grad()
+    def update_running_statistics(self, z_e: torch.Tensor, c: torch.Tensor) -> None:
+        if self.training and self._use_running_statistics:
+            unbiased = False
 
+            ze_mean = z_e.mean([0, 1]).unsqueeze(0)
+            ze_var = z_e.var([0, 1], unbiased=unbiased).unsqueeze(0)
 
-		if self.training and self.use_running_statistics:
-			unbiased = False
+            c_mean = c.mean([0]).unsqueeze(0)
+            c_var = c.var([0], unbiased=unbiased).unsqueeze(0)
 
-			ze_mean = z_e.mean([0, 1]).unsqueeze(0)
-			ze_var = z_e.var([0, 1], unbiased=unbiased).unsqueeze(0)
-
-			c_mean = c.mean([0]).unsqueeze(0)
-			c_var = c.var([0], unbiased=unbiased).unsqueeze(0)
-
-			if not self.running_statistics_initialized:
-				self.running_ze_mean.data.copy_(ze_mean)
-				self.running_ze_var.data.copy_(ze_var)
-				self.running_c_mean.data.copy_(c_mean)
-				self.running_c_var.data.copy_(c_var)
-				self.running_statistics_initialized.fill_(1)
-			else:
-				self.running_ze_mean = (self.momentum * ze_mean) + (1 - self.momentum) * self.running_ze_mean
-				self.running_ze_var = (self.momentum * ze_var) + (1 - self.momentum) * self.running_ze_var
-				self.running_c_mean = (self.momentum * c_mean) + (1 - self.momentum) * self.running_c_mean
-				self.running_c_var = (self.momentum * c_var) + (1 - self.momentum) * self.running_c_var
-
-		# wd = 0.9998 # 0.995
-		# self.running_ze_mean = wd * self.running_ze_mean
-		# self.running_ze_var = wd * self.running_ze_var
-		return
+            if not self._running_statistics_initialized:
+                self._running_ze_mean.data.copy_(ze_mean)
+                self._running_ze_var.data.copy_(ze_var)
+                self._running_c_mean.data.copy_(c_mean)
+                self._running_c_var.data.copy_(c_var)
+                self._running_statistics_initialized.fill_(1)
+            else:
+                self._running_ze_mean = (self._momentum * ze_mean) + (1 - self._momentum) * self._running_ze_mean
+                self._running_ze_var = (self._momentum * ze_var) + (1 - self._momentum) * self._running_ze_var
+                self._running_c_mean = (self._momentum * c_mean) + (1 - self._momentum) * self._running_c_mean
+                self._running_c_var = (self._momentum * c_var) + (1 - self._momentum) * self._running_c_var
 
 
-	def forward(self, codebook):
-		scale, bias = self.get_affine_params()
-		n, c = codebook.shape
-		codebook = codebook.view(self.num_groups, -1, codebook.shape[-1])
-		codebook = scale * codebook + bias
-		return codebook.reshape(n, c)
+    def forward(self, codebook: torch.Tensor) -> torch.Tensor:
+        scale, bias = self.get_affine_params()
+        n, c = codebook.shape
+        codebook = codebook.view(self._num_groups, -1, codebook.shape[-1])
+        codebook = scale * codebook + bias
+        return codebook.reshape(n, c)
 
 
-	def get_affine_params(self):
-		if self.use_running_statistics:
-			scale = (self.running_ze_var / (self.running_c_var + 1e-8)).sqrt()
-			bias = - scale * self.running_c_mean + self.running_ze_mean
-		else:
-			scale = (1. + self.lr_scale * self.scale)
-			bias = self.lr_scale * self.bias
-		return scale.unsqueeze(1), bias.unsqueeze(1)
+    def get_affine_params(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self._use_running_statistics:
+            scale = (self._running_ze_var / (self._running_c_var + 1e-8)).sqrt()
+            bias = - scale * self._running_c_mean + self._running_ze_mean
+        else:
+            scale = (1. + self._lr_scale * self._scale)
+            bias = self._lr_scale * self._bias
+        return scale.unsqueeze(1), bias.unsqueeze(1)
+
+    def set_num_groups(self, v: int) -> None:
+        self._num_groups = v
+        self.__init__(self._feature_size, self._use_running_statistics, self._momentum, self._lr_scale, self._num_groups)
+
+    def set_running_statistics(self, v: bool) -> None:
+        self._use_running_statistics = v
+        self.__init__(self._feature_size, self._use_running_statistics, self._momentum, self._lr_scale, self._num_groups)
+
+    def set_momentum(self, v: float) -> None:
+        self._momentum = v
+
+    def set_lr_scale(self, v: float) -> None:
+        self._lr_scale = v
+
+    @property
+    def momentum(self) -> float:
+        return self._momentum
+
+    @property
+    def lr_scale(self) -> float:
+        return self._lr_scale
+
+    @property
+    def running_statistics(self) -> bool:
+        return self._use_running_statistics
 
 class STEQuantizer(Quantizer):
     def __init__(
@@ -106,7 +119,7 @@ class STEQuantizer(Quantizer):
         if self._affine_lr > 0:
             self.affine_transform = AffineTransform(
                 self._latent_dim,
-                use_running_statistics=True,
+                use_running_statistics=False,
                 lr_scale=affine_lr,
                 num_groups=1,
                 )
@@ -119,7 +132,7 @@ class STEQuantizer(Quantizer):
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        if self.affine_transform is not None and self.training:
+        if self.affine_transform is not None:
             self.affine_transform.update_running_statistics(x, self.embedding.weight)
             self.embedding.weight.data = self.affine_transform(self.embedding.weight)
             self.embedding.weight.data = self.embedding.weight.data.to(x.device)
@@ -176,7 +189,6 @@ class STEQuantizer(Quantizer):
     def affine_lr(self) -> float:
         return self._affine_lr
 
-
 class STEQuantizer2d(STEQuantizer):
     def __init__(
         self,
@@ -195,7 +207,7 @@ class STEQuantizer2d(STEQuantizer):
         x = x.permute(0, 2, 3, 1)
         x_flat = x.reshape(B * H * W, C)
 
-        if self.affine_transform is not None and self.training:
+        if self.affine_transform is not None:
             self.affine_transform.update_running_statistics(x, self.embedding.weight)
             self.embedding.weight.data = self.affine_transform(self.embedding.weight)
             self.embedding.weight.data = self.embedding.weight.data.to(x.device)

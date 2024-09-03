@@ -4,14 +4,15 @@
 #include "../nn.hpp"
 #include <boost/optional.hpp>
 
+/* Implementation of VQ-STE++ https://proceedings.mlr.press/v202/huh23a/huh23a.pdf */
 namespace butane {
     namespace nn {
         class AffineTransformImpl : public torch::nn::Module {
         public:
             AffineTransformImpl() = default;
-            AffineTransformImpl(int64_t latent_dims, bool use_running_statistics = false, double momentum = 0.1,
+            AffineTransformImpl(int64_t feature_size, bool use_running_statistics = false, double momentum = 0.1,
                 double lr_scale = 1.0, int64_t num_groups = 1)
-                : _latent_dims(latent_dims),
+                : _feature_size(feature_size),
                   _use_running_statistics(use_running_statistics),
                   _num_groups(num_groups),
                   _momentum(momentum),
@@ -20,14 +21,14 @@ namespace butane {
 
                 if (_use_running_statistics) {
                     _running_statistics_initialized = torch::zeros(1);
-                    _running_ze_mean = register_buffer("running_ze_mean", torch::zeros({_num_groups, latent_dims}));
-                    _running_ze_var = register_buffer("running_ze_var", torch::ones({_num_groups, latent_dims}));
-                    _running_c_mean = register_buffer("running_c_mean", torch::zeros({_num_groups, latent_dims}));
-                    _running_c_var = register_buffer("running_c_var", torch::ones({_num_groups, latent_dims}));
+                    _running_ze_mean = register_buffer("running_ze_mean", torch::zeros({_num_groups, feature_size}));
+                    _running_ze_var = register_buffer("running_ze_var", torch::ones({_num_groups, feature_size}));
+                    _running_c_mean = register_buffer("running_c_mean", torch::zeros({_num_groups, feature_size}));
+                    _running_c_var = register_buffer("running_c_var", torch::ones({_num_groups, feature_size}));
                 }
                 else {
-                    _scale = register_parameter("scale", torch::zeros({_num_groups, latent_dims}));
-                    _bias = register_parameter("bias", torch::zeros({_num_groups, latent_dims}));
+                    _scale = register_parameter("scale", torch::zeros({_num_groups, feature_size}));
+                    _bias = register_parameter("bias", torch::zeros({_num_groups, feature_size}));
                 }
             }
 
@@ -71,14 +72,14 @@ namespace butane {
                 _num_groups = v;
                 if (_use_running_statistics) {
                     _running_statistics_initialized = torch::zeros(1);
-                    _running_ze_mean.set_data(torch::zeros({_num_groups, _latent_dims}));
-                    _running_ze_var.set_data(torch::ones({_num_groups, _latent_dims}));
-                    _running_c_mean.set_data(torch::zeros({_num_groups, _latent_dims}));
-                    _running_c_var.set_data(torch::ones({_num_groups, _latent_dims}));
+                    _running_ze_mean.set_data(torch::zeros({_num_groups, _feature_size}));
+                    _running_ze_var.set_data(torch::ones({_num_groups, _feature_size}));
+                    _running_c_mean.set_data(torch::zeros({_num_groups, _feature_size}));
+                    _running_c_var.set_data(torch::ones({_num_groups, _feature_size}));
                 }
                 else {
-                    _scale.set_data(torch::zeros({_num_groups, _latent_dims}));
-                    _bias.set_data(torch::zeros({_num_groups, _latent_dims}));
+                    _scale.set_data(torch::zeros({_num_groups, _feature_size}));
+                    _bias.set_data(torch::zeros({_num_groups, _feature_size}));
                 }
             }
 
@@ -87,10 +88,10 @@ namespace butane {
                 _use_running_statistics = v;
                 if (_use_running_statistics) {
                     _running_statistics_initialized = torch::zeros(1);
-                    _running_ze_mean = register_buffer("running_ze_mean", torch::zeros({_num_groups, _latent_dims}));
-                    _running_ze_var = register_buffer("running_ze_var", torch::ones({_num_groups, _latent_dims}));
-                    _running_c_mean = register_buffer("running_c_mean", torch::zeros({_num_groups, _latent_dims}));
-                    _running_c_var = register_buffer("running_c_var", torch::ones({_num_groups, _latent_dims}));
+                    _running_ze_mean = register_buffer("running_ze_mean", torch::zeros({_num_groups, _feature_size}));
+                    _running_ze_var = register_buffer("running_ze_var", torch::ones({_num_groups, _feature_size}));
+                    _running_c_mean = register_buffer("running_c_mean", torch::zeros({_num_groups, _feature_size}));
+                    _running_c_var = register_buffer("running_c_var", torch::ones({_num_groups, _feature_size}));
                     _scale.set_requires_grad(false);
                     _bias.set_requires_grad(false);
                 }
@@ -118,7 +119,7 @@ namespace butane {
             bool running_statistics() const { return _use_running_statistics; }
 
         private:
-            int64_t _latent_dims;
+            int64_t _feature_size;
             torch::Tensor _running_statistics_initialized;
             torch::Tensor _running_ze_mean;
             torch::Tensor _running_ze_var;
