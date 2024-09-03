@@ -11,7 +11,8 @@ namespace butane {
             AffineTransformImpl() = default;
             AffineTransformImpl(int64_t latent_dims, bool use_running_statistics = false, double momentum = 0.1,
                 double lr_scale = 1.0, int64_t num_groups = 1)
-                : _use_running_statistics(use_running_statistics),
+                : _latent_dims(latent_dims),
+                  _use_running_statistics(use_running_statistics),
                   _num_groups(num_groups),
                   _momentum(momentum),
                   _lr_scale(lr_scale)
@@ -65,7 +66,59 @@ namespace butane {
                 }
             }
 
+            void set_num_groups(int v)
+            {
+                _num_groups = v;
+                if (_use_running_statistics) {
+                    _running_statistics_initialized = torch::zeros(1);
+                    _running_ze_mean.set_data(torch::zeros({_num_groups, _latent_dims}));
+                    _running_ze_var.set_data(torch::ones({_num_groups, _latent_dims}));
+                    _running_c_mean.set_data(torch::zeros({_num_groups, _latent_dims}));
+                    _running_c_var.set_data(torch::ones({_num_groups, _latent_dims}));
+                }
+                else {
+                    _scale.set_data(torch::zeros({_num_groups, _latent_dims}));
+                    _bias.set_data(torch::zeros({_num_groups, _latent_dims}));
+                }
+            }
+
+            void set_running_statistics(bool v)
+            {
+                _use_running_statistics = v;
+                if (_use_running_statistics) {
+                    _running_statistics_initialized = torch::zeros(1);
+                    _running_ze_mean = register_buffer("running_ze_mean", torch::zeros({_num_groups, _latent_dims}));
+                    _running_ze_var = register_buffer("running_ze_var", torch::ones({_num_groups, _latent_dims}));
+                    _running_c_mean = register_buffer("running_c_mean", torch::zeros({_num_groups, _latent_dims}));
+                    _running_c_var = register_buffer("running_c_var", torch::ones({_num_groups, _latent_dims}));
+                    _scale.set_requires_grad(false);
+                    _bias.set_requires_grad(false);
+                }
+                else {
+                    _scale.set_requires_grad(true);
+                    _bias.set_requires_grad(true);
+                    _running_ze_mean.set_requires_grad(false);
+                    _running_ze_var.set_requires_grad(false);
+                    _running_c_mean.set_requires_grad(false);
+                    _running_c_var.set_requires_grad(false);
+                }
+            }
+            void set_momentum(double v)
+            {
+                _momentum = v;
+            }
+
+            void set_lr_scale(double v)
+            {
+                _lr_scale = v;
+            }
+
+            double momentum() const { return _momentum; }
+            double lr_scale() const { return _lr_scale; }
+            bool running_statistics() const { return _use_running_statistics; }
+
         private:
+            int64_t _latent_dims;
             torch::Tensor _running_statistics_initialized;
             torch::Tensor _running_ze_mean;
             torch::Tensor _running_ze_var;
@@ -113,14 +166,14 @@ namespace butane {
                     _optimizer = std::make_shared<Optimizer>(embedding->parameters());
 
                 if (_affine_lr > 0.) {
-                    _affine_transform = register_module("AffineTransform", AffineTransform(_latent_dim, false, _affine_lr, _affine_groups));
+                    _affine_transform = register_module("AffineTransform", AffineTransform(_latent_dim, false, .1,  _affine_lr, _affine_groups));
                     _has_affince_transform = true;
                 }
             }
 
             std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x)
             {
-                if (this->is_training() && _has_affince_transform) {
+                if (_has_affince_transform) {
                     _affine_transform->update_running_statistics(x, embedding->weight);
                     embedding->weight.set_data(_affine_transform->forward(embedding->weight));
                 }
@@ -162,7 +215,6 @@ namespace butane {
 
                 return {quantized_latents, quantization_loss};
             }
-
             void set_sync_nu(double new_sync_nu)
             {
                 _sync_nu = new_sync_nu;
@@ -175,6 +227,7 @@ namespace butane {
 
             double sync_nu() const { return _sync_nu; }
             double affine_lr() const { return _affine_lr; }
+            AffineTransform& affine_transform() { return _affine_transform; }
 
         protected:
             double _sync_nu, _affine_lr;
@@ -196,7 +249,7 @@ namespace butane {
                 x = x.permute({0, 2, 3, 1});
                 torch::Tensor x_flat = x.clone().reshape({B * H * W, C});
 
-                if (this->_has_affince_transform && this->is_training()) {
+                if (this->_has_affince_transform) {
                     this->_affine_transform->update_running_statistics(x, this->embedding->weight);
                     this->embedding->weight.set_data(this->_affine_transform->forward(this->embedding->weight));
                 }
