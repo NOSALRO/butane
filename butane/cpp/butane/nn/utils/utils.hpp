@@ -24,9 +24,19 @@ namespace butane {
 
             using bvec = std::vector<bool>;
             using dvec = std::vector<double>;
+            using dvec2d = std::vector<std::vector<double>>;
 
             using conv_padding_mode_t = torch::nn::detail::conv_padding_mode_t;
             using pad_enum_vec = std::vector<conv_padding_mode_t>;
+            typedef std::variant<
+                torch::enumtype::kNearest,
+                torch::enumtype::kLinear,
+                torch::enumtype::kBilinear,
+                torch::enumtype::kBicubic,
+                torch::enumtype::kTrilinear>
+                upsample_mode_t;
+            // using upsample_mode_t = torch::enumtype::mode_t;
+            using upsample_enum_vec = std::vector<upsample_mode_t>;
 
             template <int N>
             using ConvTranspose = typename std::conditional<N == 1, torch::nn::ConvTranspose1d,

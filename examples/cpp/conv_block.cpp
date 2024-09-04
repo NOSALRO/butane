@@ -60,5 +60,19 @@ int main(int argc, char** argv)
 
     std::cout << c3 << std::endl;
     std::cout << c3t << std::endl;
+    ConvUpsampleBlockOptions co_dec{
+        .input_dims = {2, 100, 100},
+        .channels = {32, 1},
+        .activation_function = {torch::nn::GELU(), torch::nn::Sigmoid()},
+        .conv_stride = {{1}, {1}},
+        .conv_bias = {true},
+        .upsample_size = {{12}, {30}},
+        .upsample_scale_factor = {{3.}, {3.}},
+        .upsample_mode = {torch::kBilinear, torch::kNearest},
+        .upsample_align_corners = {true, true},
+        .output_activation = false,
+        .normalization = {false, false}};
+
+    ConvUpsample2dBlock<torch::nn::BatchNorm2d, torch::nn::MaxPool2d> c_dec(co_dec);
     return 0;
 }

@@ -16,8 +16,9 @@ if __name__ == "__main__":
         activation_function = [torch.nn.GELU()],
         conv_stride = [1, 1],
         conv_bias = [True, True],
-        pool_kernels = [0, 0],
-        normalization = [True, False]
+        pool_kernels = [4, 4],
+        pool_stride = [2, 2],
+        normalization = [True, True]
     )
 
     mlp_enc = butane.nn.MLPBlock(
@@ -34,14 +35,17 @@ if __name__ == "__main__":
         activation_function=[torch.nn.ReLU(), torch.nn.ReLU(), torch.nn.ReLU()],
         output_activation=False)
 
-    c_dec = butane.nn.ConvTranspose2dBlock(
+    c_dec = butane.nn.ConvUpsample2dBlock(
         input_dims = [c_enc.output_size[0].item(), c_enc.output_size[1].item(), c_enc.output_size[2].item()],
         channels = [32, 1],
         activation_function = [torch.nn.GELU(), torch.nn.Sigmoid()],
         conv_stride = [1, 1],
         conv_bias = [True, True],
-        output_activation = False,
-        normalization = [False, False])
+        upsample_scale_factor=[3, 3],
+        upsample_size=[12, 30],
+        upsample_mode=['nearest', 'nearest'],
+        output_activation = True,
+        normalization = [True, False])
 
     quantizer = butane.nn.STEQuantizer(2, 100, affine_lr=1.5, sync_nu=2.0, optimizer=torch.optim.Adam, device=dev)
     quantizer.set_beta(1.)
