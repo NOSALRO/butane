@@ -15,18 +15,9 @@ namespace butane {
                 return (9 / 8. * torch::sin(x)) + (1 / 8. * torch::sin(3. * x));
             }
 
-            inline torch::nn::AnyModule unflatten(int64_t start_dim, const torch::Tensor& sizes)
+            inline torch::Tensor scaled_tanh(torch::Tensor x, double alpha = 1.)
             {
-                std::vector<int64_t> vec_sizes;
-                vec_sizes.reserve(sizes.numel());
-                for (unsigned int i = 0; i < sizes.numel(); ++i)
-                    vec_sizes.push_back(sizes[i].item<int64_t>());
-                return torch::nn::AnyModule(torch::nn::Unflatten(torch::nn::UnflattenOptions(1, vec_sizes)));
-            }
-
-            inline torch::nn::AnyModule flatten(int64_t start_dim)
-            {
-                return torch::nn::AnyModule(torch::nn::Flatten(torch::nn::FlattenOptions().start_dim(1)));
+                return static_cast<double>(alpha) * torch::tanh(x);
             }
         } // namespace functional
 
@@ -51,5 +42,19 @@ namespace butane {
             }
         };
         TORCH_MODULE(Squashing);
+
+        class ScaledTanhImpl : public torch::nn::Module {
+        public:
+            ScaledTanhImpl(double alpha = 1.) : _alpha(static_cast<double>(alpha)) {}
+
+            inline torch::Tensor forward(torch::Tensor x)
+            {
+                std::cout << functional::scaled_tanh(x, _alpha).max() << std::endl;
+                return functional::scaled_tanh(x, _alpha);
+            }
+        private:
+            double _alpha;
+        };
+        TORCH_MODULE(ScaledTanh);
     } // namespace nn
 } // namespace butane

@@ -47,8 +47,9 @@ class Quantizer(torch.nn.Module):
         torch.nn.init.uniform_(self.embedding.weight, low, high)
         self.embedding.weight.requires_grad = True
 
-    def init_codebook_kmeans(self, low: float, high: float) -> None:
-        rdata = torch.empty(self._n_centers * 400, self._latent_dim, device=self._device).uniform_(low, high)
+    def init_codebook_kmeans(self, low: float, high: float, max_data: int = -1) -> None:
+        max_data = self._n_centers * 400 if max_data == -1 else max_data
+        rdata = torch.empty(max_data, self._latent_dim, device=self._device).uniform_(low, high)
         kmeans = butane.clustering.KMeans(n_centroids=self._n_centers, init='kmeans++')
         kmeans.fit(rdata)
         self.embedding.weight.data = kmeans.centroids

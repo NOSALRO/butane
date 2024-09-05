@@ -54,11 +54,12 @@ namespace butane {
                 embedding->weight.set_requires_grad(true);
             }
 
-            void init_codebook_kmeans(double low, double high)
+            void init_codebook_kmeans(double low, double high, int max_data = -1)
             {
-                torch::Tensor rdata = torch::empty({_n_centers * 400, _latent_dim}).uniform_(static_cast<double>(low), static_cast<double>(high));
+                max_data = (max_data == -1) ? _n_centers * 400 : max_data;
+                torch::Tensor rdata = torch::empty({max_data, _latent_dim}).uniform_(static_cast<double>(low), static_cast<double>(high));
                 rdata = rdata.to(_device);
-                clustring::KMeans kmeans(_n_centers, butane::KMeansPlusPlus, 1e-18, -1);
+                clustring::KMeans kmeans(_n_centers, butane::KMeansPlusPlus, 1e-4, -1);
                 kmeans.fit(rdata);
                 embedding->weight.set_data(kmeans.centroids());
                 embedding->weight.set_requires_grad(true);

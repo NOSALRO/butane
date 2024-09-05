@@ -5,3 +5,6 @@ def gaussian(x: torch.Tensor) -> torch.Tensor:
 
 def squashing(x: torch.Tensor) -> torch.Tensor:
     return (9 / 8. * torch.sin(x)) + (1 / 8. * torch.sin(3. * x))
+
+def scaled_tanh(x: torch.Tensor, alpha: float) -> torch.Tensor:
+    return alpha * torch.tanh(x)
