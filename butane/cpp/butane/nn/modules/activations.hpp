@@ -49,7 +49,6 @@ namespace butane {
 
             inline torch::Tensor forward(torch::Tensor x)
             {
-                std::cout << functional::scaled_tanh(x, _alpha).max() << std::endl;
                 return functional::scaled_tanh(x, _alpha);
             }
         private:
