@@ -32,7 +32,7 @@ class AE(torch.nn.Module):
     ) -> None:
         sum_loss = 0.
         n_batches = len(dl)
-        for n_batches, batch in enumerate(dl):
+        for batch in dl:
             if self.training:
                 optimizer.zero_grad()
             x_reconstructed = self.forward(batch["data"])
