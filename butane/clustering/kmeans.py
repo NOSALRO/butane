@@ -44,8 +44,7 @@ class KMeans:
                 break
 
     def _init_random(self, x: torch.Tensor) -> None:
-        self.centroids = torch.distributions.Uniform(low=x.min(), high=x.max()).rsample((self.n_centroids, x.size(-1)))
-        self.centroids = self.centroids.to(x.device)
+        self.centroids = x[torch.randperm(x.size(0))[:self.n_centroids]]
 
     def _init_plusplus(self, x: torch.Tensor) -> None:
         centroid_idx = torch.randint(len(x), size=(1,), dtype=torch.int32)

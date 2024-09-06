@@ -57,11 +57,7 @@ namespace butane {
 
             void _init_random(const torch::Tensor& x)
             {
-                torch::Tensor high_, low_;
-                high_ = std::get<0>(torch::max(x, 0)), low_ = std::get<0>(torch::min(x, 0));
-                for (int i = 0; i < x.sizes()[1]; ++i) {
-                    _centroids.index({Slice(), i}).uniform_(low_[i].item<double>(), high_[i].item<double>());
-                }
+                _centroids = x.index_select(0, torch::randperm(x.size(0)).index({Slice(None, _n_centroids)}).to(x.device()));
             }
 
             void _init_plusplus(const torch::Tensor& x)
