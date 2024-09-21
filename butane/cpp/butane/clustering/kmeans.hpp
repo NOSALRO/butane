@@ -20,9 +20,12 @@ namespace butane {
                 random_state == -1 ? torch::manual_seed(time(0)) : torch::manual_seed(random_state);
             };
 
-            void fit(const torch::Tensor& x)
+            void fit(torch::Tensor& x, std::optional<torch::Device> device = std::nullopt)
             {
-                _centroids = torch::empty({_n_centroids, x.size(1)}).to(x.device());
+                torch::Device _x_device = x.device();
+                torch::Device dev = (device) ? device.value() : x.device();
+                _centroids = torch::empty({_n_centroids, x.size(1)}).to(dev);
+                x = x.to(dev);
                 switch (_init) {
                 case KMeansPlusPlus:
                     this->_init_plusplus(x);
@@ -37,13 +40,16 @@ namespace butane {
                     torch::Tensor closest = dist.argmin(-1);
                     torch::Tensor assignments_per_centroid_count = torch::bincount(closest, {}, _n_centroids);
                     torch::Tensor sum_of_x_per_centroid = torch::zeros_like(_centroids).scatter_add_(0, closest.unsqueeze(1).expand_as(x), x);
-                    torch::Tensor valid_centroids = assignments_per_centroid_count.nonzero().squeeze().to(x.device());
+                    torch::Tensor valid_centroids = assignments_per_centroid_count.nonzero().squeeze().to(dev);
                     _centroids.index_put_(
                         {valid_centroids},
                         sum_of_x_per_centroid.index_select(0, {valid_centroids}) / assignments_per_centroid_count.index_select(0, {valid_centroids}).unsqueeze(1));
                     if (torch::linalg_norm(_centroids - _prev_centroids).item<double>() < _tol)
                         break;
                 }
+
+                x = x.to(_x_device);
+                _centroids = _centroids.to(_x_device);
             }
 
             const torch::Tensor centroids() const { return _centroids; }
@@ -86,27 +92,31 @@ namespace butane {
                 double tol = 1e-04,
                 int random_state = -1) : KMeans(n_centroids, init, max_iters, tol), _batch_size(batch_size) {}
 
-            void fit(const torch::Tensor& x)
+            void fit(torch::Tensor& x, std::optional<torch::Device> device = std::nullopt)
             {
-                _centroids = torch::empty({_n_centroids, x.size(1)}).to(x.device());
+                torch::Device _x_device = x.device();
+                torch::Device dev = (device) ? device.value() : x.device();
+                _centroids = torch::empty({_n_centroids, x.size(1)}).to(dev);
                 switch (_init) {
                 case KMeansPlusPlus:
                     this->_init_plusplus(x);
                 case Random:
                     this->_init_random(x);
                 }
+                _centroids = _centroids.to(dev);
 
                 torch::Tensor _prev_centroids;
                 for (int64_t i = 0; i < _max_iters; ++i) {
                     _prev_centroids = _centroids.clone();
                     torch::Tensor mini_batch_idx = torch::randint(0, x.size(0), {_batch_size}).to(x.device());
                     torch::Tensor mini_batch = x.index_select(0, {mini_batch_idx});
+                    mini_batch = mini_batch.to(dev);
 
                     torch::Tensor dist = torch::cdist(mini_batch, _centroids);
                     torch::Tensor closest = dist.argmin(-1);
                     torch::Tensor assignments_per_centroid_count = torch::bincount(closest, {}, _n_centroids);
                     torch::Tensor sum_of_x_per_centroid = torch::zeros_like(_centroids).scatter_add_(0, closest.unsqueeze(1).expand_as(mini_batch), mini_batch);
-                    torch::Tensor valid_centroids = assignments_per_centroid_count.nonzero().squeeze().to(x.device());
+                    torch::Tensor valid_centroids = assignments_per_centroid_count.nonzero().squeeze().to(dev);
                     assignments_per_centroid_count = assignments_per_centroid_count.to(torch::kFloat32);
                     torch::Tensor eta = (1./assignments_per_centroid_count.index({valid_centroids})).unsqueeze(1);
                     _centroids.index_put_(
@@ -117,6 +127,8 @@ namespace butane {
                     if (torch::linalg_norm(_centroids - _prev_centroids).item<double>() < _tol)
                         break;
                 }
+                x = x.to(_x_device);
+                _centroids = _centroids.to(_x_device);
             }
 
         private:

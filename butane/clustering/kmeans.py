@@ -21,7 +21,12 @@ class KMeans:
             torch.cuda.manual_seed(random_state)
 
 
-    def fit(self, x: torch.Tensor) -> None:
+    def fit(self, x: torch.Tensor, device: torch.device = None) -> None:
+
+        _x_device = x.device
+        dev = device if device is not None else x.device
+
+        x = x.to(dev)
         if self.init == 'kmeans++':
             self._init_plusplus(x)
         elif self.init == 'random':
@@ -42,6 +47,9 @@ class KMeans:
             self.centroids[valid_centroids] = sum_of_x_per_centroid[valid_centroids] / assignments_per_centroid_count[valid_centroids].unsqueeze(1)
             if torch.linalg.norm(self.centroids - prev_centroids) < self.tol:
                 break
+
+        x = x.to(_x_device)
+        self.centroids = self.centroids.to(_x_device)
 
     def _init_random(self, x: torch.Tensor) -> None:
         self.centroids = x[torch.randperm(x.size(0))[:self.n_centroids]]
@@ -72,19 +80,24 @@ class MiniBatchKMeans(KMeans):
         super().__init__(n_centroids, init, max_iters, tol, random_state)
         self._batch_size = batch_size
 
-    def fit(self, x: torch.Tensor) -> None:
+    def fit(self, x: torch.Tensor, device: torch.device = None) -> None:
+        _x_device = x.device
+        dev = device if device is not None else x.device
+
         if self.init == 'kmeans++':
             self._init_plusplus(x)
         elif self.init == 'random':
             self._init_random(x)
         else:
             raise ValueError('Invalid KMeans init method!')
+        self.centroids = self.centroids.to(dev)
 
         for i in range(self._max_iters):
             prev_centroids = self.centroids.clone()
 
             mini_batch_idx = torch.randint(0, x.size(0), (self._batch_size,), device=x.device)
             mini_batch = x[mini_batch_idx]
+            mini_batch = mini_batch.to(dev)
 
             dist = torch.cdist(mini_batch, self.centroids)
             closest = dist.argmin(-1)
@@ -102,3 +115,5 @@ class MiniBatchKMeans(KMeans):
 
             if torch.linalg.norm(self.centroids - prev_centroids) < self.tol:
                 break
+        x = x.to(_x_device)
+        self.centroids = self.centroids.to(_x_device)
