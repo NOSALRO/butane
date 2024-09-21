@@ -20,7 +20,7 @@ namespace butane {
                 random_state == -1 ? torch::manual_seed(time(0)) : torch::manual_seed(random_state);
             };
 
-            void fit(torch::Tensor& x, std::optional<torch::Device> device = std::nullopt)
+            void fit(torch::Tensor x, std::optional<torch::Device> device = std::nullopt)
             {
                 torch::Device _x_device = x.device();
                 torch::Device dev = (device) ? device.value() : x.device();
@@ -92,7 +92,7 @@ namespace butane {
                 double tol = 1e-04,
                 int random_state = -1) : KMeans(n_centroids, init, max_iters, tol), _batch_size(batch_size) {}
 
-            void fit(torch::Tensor& x, std::optional<torch::Device> device = std::nullopt)
+            void fit(torch::Tensor x, std::optional<torch::Device> device = std::nullopt)
             {
                 torch::Device _x_device = x.device();
                 torch::Device dev = (device) ? device.value() : x.device();
