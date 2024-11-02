@@ -90,7 +90,7 @@ namespace butane {
                     _data = data.detach().clone();
                 }
                 else {
-                    torch::Tensor tmp_data = data.detach().clone();
+                    torch::Tensor tmp_data = data.detach().clone().to(_device);
                     if (_data.sizes().size() > tmp_data.sizes().size()) {
                         tmp_data = tmp_data.unsqueeze(0);
                     }
@@ -117,6 +117,7 @@ namespace butane {
                 }
                 else {
                     torch::Tensor tmp_data = std::move(data);
+                    tmp_data = tmp_data.to(_device);
                     if (sizes().size() > tmp_data.sizes().size()) {
                         tmp_data = tmp_data.unsqueeze(0);
                     }

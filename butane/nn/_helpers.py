@@ -1,5 +1,13 @@
 from typing import Optional, Callable, Union, Tuple, List, Any
+import functools
 import torch
+
+
+def module_name(module: Union[torch.nn.Module, functools.partial]) -> str:
+    if isinstance(module, functools.partial):
+        return module.func.__name__
+    else:
+        return module.__name__
 
 def conv_def(conv_type: str, transpose: Optional[bool] = False) -> Callable[object, object]:
     def inner(cls):
@@ -35,6 +43,9 @@ def _fill_defaults(
     size: int,
     size_of_item: Optional[int] = 0
 ) -> List[Union[int, Tuple[Any,...]]]:
+
+    if not isinstance(vector, (tuple, list)):
+        vector = [vector]
 
     filled_vector = []
     if len(vector) == 1:

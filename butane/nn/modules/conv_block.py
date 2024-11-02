@@ -3,7 +3,7 @@ import math
 import copy
 import torch
 from .._typedefs import *
-from .._helpers import _fill_defaults, conv_def, _prod
+from .._helpers import _fill_defaults, conv_def, _prod, module_name
 
 class ConvBlock(torch.nn.Module):
 
@@ -25,7 +25,7 @@ class ConvBlock(torch.nn.Module):
         dropout: FloatParams = [0.],
         output_activation: Optional[bool] = False,
         normalization: BoolParams = [False],
-        normalization_type: Optional[torch.nn.Module] = None
+        normalization_type: ModuleParams = None
     ) -> None:
 
         # Initialize default args.
@@ -47,20 +47,24 @@ class ConvBlock(torch.nn.Module):
         pool_pad = _fill_defaults(pool_pad, len(channels), self.N)
         dropout = _fill_defaults(dropout, len(channels))
         normalization = _fill_defaults(normalization, len(channels))
+        self.norm_type = _fill_defaults(self.norm_type, len(channels))
+        self.pool = _fill_defaults(self.pool, len(channels))
 
         # Check if we are set to build our model
-        assert (
-            len(channels) == len(activation_function)
-            and len(conv_kernels) == len(conv_stride)
-            and len(conv_stride) == len(pool_kernels)
-            and len(conv_stride) == len(conv_pad)
-            and len(conv_pad) == len(conv_bias)
-            and len(conv_bias) == len(pool_stride)
-            and len(pool_kernels) == len(pool_stride)
-            and len(pool_stride) == len(pool_pad)
-            and len(pool_pad) == len(dropout)
-            and len(dropout) == len(normalization)
-        ), "Params size must be the same!"
+        assert len(channels) == len(activation_function), "Params size must be the same!"
+        assert len(channels) == len(conv_kernels), "Params size must be the same!"
+        assert len(channels) == len(conv_stride), "Params size must be the same!"
+        assert len(channels) == len(conv_pad), "Params size must be the same!"
+        assert len(channels) == len(conv_bias), "Params size must be the same!"
+        assert len(channels) == len(conv_pad_mode), "Params size must be the same!"
+        assert len(channels) == len(self.pool), "Params size must be the same!"
+        assert len(channels) == len(pool_kernels), "Params size must be the same!"
+        assert len(channels) == len(pool_stride), "Params size must be the same!"
+        assert len(channels) == len(pool_kernels), "Params size must be the same!"
+        assert len(channels) == len(pool_pad), "Params size must be the same!"
+        assert len(channels) == len(dropout), "Params size must be the same!"
+        assert len(channels) == len(normalization), "Params size must be the same!"
+        assert len(channels) == len(self.norm_type), "Params size must be the same!"
 
         super().__init__()
 
@@ -78,13 +82,14 @@ class ConvBlock(torch.nn.Module):
                     conv_pad[i],
                     conv_bias[i],
                     conv_pad_mode[i],
+                    self.pool[i],
                     pool_kernels[i],
                     pool_stride[i],
                     pool_pad[i],
                     dropout[i],
                     activation_function[i] if (i + 1) != (len(_channels) - 1) or output_activation else None, # if the model is single Conv1dBlock check if we want activation function on the output
                     normalization[i], #if (i + 1) != (len(channels) - 1) else False, #
-                    self.norm_type
+                    self.norm_type[i]
             ))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -116,6 +121,7 @@ class ConvBlock(torch.nn.Module):
         conv_pad: int,
         conv_bias: bool,
         conv_pad_mode: str,
+        pool: torch.nn.Module,
         pool_kernel: int,
         pool_stride: int,
         pool_pad: int,
@@ -126,14 +132,17 @@ class ConvBlock(torch.nn.Module):
     ) -> List[torch.nn.Module]:
         ret = []
         conv = self.conv(in_channels, out_channels, kernel_size=conv_kernel, stride=conv_stride, padding=conv_pad, padding_mode=conv_pad_mode, bias=conv_bias)
-        pool = self.pool(pool_kernel, stride = pool_stride, padding = pool_pad) if _prod(pool_kernel) != 0 else None
+        pool = pool(pool_kernel, stride = pool_stride, padding = pool_pad) if _prod(pool_kernel) != 0 else None
         drop = torch.nn.Dropout(dropout) if dropout != 0 else None
-        if norm_type.__name__ == "LayerNorm":
-            norm_layer = norm_type(list(self.__component_output_sz(conv, self.output_size)[1:]))
-        else:
-            norm_layer = norm_type(out_channels)
         ret.append(conv)
         if norm:
+            if module_name(norm_type) == "LayerNorm":
+                norm_layer = norm_type(list(self.__component_output_sz(conv, self.output_size)[1:]))
+            elif module_name(norm_type) == "GroupNorm":
+                comp_out = self.__component_output_sz(conv, self.output_size)
+                norm_layer = norm_type(num_channels=comp_out[1])
+            else:
+                norm_layer = norm_type(out_channels)
             ret.append(norm_layer)
         if af is not None:
             ret.append(af)
@@ -176,17 +185,19 @@ class ConvTransposeBlock(torch.nn.Module):
         dropout = _fill_defaults(dropout, len(channels))
         normalization = _fill_defaults(normalization, len(channels))
         conv_bias = _fill_defaults(conv_bias, len(channels))
+        self.norm_type = _fill_defaults(self.norm_type, len(channels))
 
 
         # Check if we are set to build our model
-        assert (
-            len(channels) == len(activation_function)
-            and len(conv_kernels) == len(conv_stride)
-            and len(conv_stride) == len(conv_pad)
-            and len(conv_pad) == len(conv_bias)
-            and len(conv_bias) == len(dropout)
-            and len(dropout) == len(normalization)
-        ), "Params size must be the same!"
+        assert len(channels) == len(activation_function), "Params size must be the same!"
+        assert len(channels) == len(conv_kernels), "Params size must be the same!"
+        assert len(channels) == len(conv_stride), "Params size must be the same!"
+        assert len(channels) == len(conv_pad), "Params size must be the same!"
+        assert len(channels) == len(conv_bias), "Params size must be the same!"
+        assert len(channels) == len(conv_output_padding), "Params size must be the same!"
+        assert len(channels) == len(dropout), "Params size must be the same!"
+        assert len(channels) == len(normalization), "Params size must be the same!"
+        assert len(channels) == len(self.norm_type), "Params size must be the same!"
 
         super().__init__()
 
@@ -207,7 +218,7 @@ class ConvTransposeBlock(torch.nn.Module):
                     dropout[i],
                     activation_function[i] if (i + 1) != (len(_channels) - 1) or output_activation else None, # if the model is single Conv1dBlock check if we want activation function on the output
                     normalization[i], #if (i + 1) != (len(channels) - 1) else False, #
-                    self.norm_type
+                    self.norm_type[i]
             ))
 
 
@@ -250,8 +261,11 @@ class ConvTransposeBlock(torch.nn.Module):
         drop = torch.nn.Dropout(dropout) if dropout != 0 else None
         ret.append(conv)
         if norm:
-            if norm_type.__name__ == "LayerNorm":
+            if module_name(norm_type) == "LayerNorm":
                 norm_layer = norm_type(list(self.__component_output_sz(conv, self.output_size)[1:]))
+            elif module_name(norm_type) == "GroupNorm":
+                comp_out = self.__component_output_sz(conv, self.output_size)
+                norm_layer = norm_type(num_channels=comp_out[1])
             else:
                 norm_layer = norm_type(out_channels)
             ret.append(norm_layer)
@@ -302,20 +316,22 @@ class ConvUpsampleBlock(torch.nn.Module):
         upsample_align_corners = _fill_defaults(upsample_align_corners, len(channels))
         dropout = _fill_defaults(dropout, len(channels))
         normalization = _fill_defaults(normalization, len(channels))
+        self.norm_type = _fill_defaults(self.norm_type, len(channels))
 
         # Check if we are set to build our model
-        assert (
-            len(channels) == len(activation_function)
-            and len(conv_kernels) == len(conv_stride)
-            and len(conv_stride) == len(conv_pad)
-            and len(conv_pad) == len(conv_bias)
-            and len(conv_bias) == len(dropout)
-            and len(dropout) == len(normalization)
-            and len(normalization) == len(upsample_scale_factor)
-            and len(normalization) == len(upsample_size)
-            and len(normalization) == len(upsample_mode)
-            and len(upsample_mode) == len(upsample_align_corners)
-        ), "Params size must be the same!"
+        assert len(channels) == len(activation_function), "Params size must be the same!"
+        assert len(channels) == len(conv_kernels), "Params size must be the same!"
+        assert len(channels) == len(conv_stride), "Params size must be the same!"
+        assert len(channels) == len(conv_pad), "Params size must be the same!"
+        assert len(channels) == len(conv_bias), "Params size must be the same!"
+        assert len(channels) == len(conv_pad_mode), "Params size must be the same!"
+        assert len(channels) == len(dropout), "Params size must be the same!"
+        assert len(channels) == len(upsample_scale_factor), "Params size must be the same!"
+        assert len(channels) == len(upsample_size), "Params size must be the same!"
+        assert len(channels) == len(upsample_mode), "Params size must be the same!"
+        assert len(channels) == len(upsample_align_corners), "Params size must be the same!"
+        assert len(channels) == len(normalization), "Params size must be the same!"
+        assert len(channels) == len(self.norm_type), "Params size must be the same!"
 
         super().__init__()
 
@@ -340,7 +356,7 @@ class ConvUpsampleBlock(torch.nn.Module):
                     dropout[i],
                     activation_function[i] if (i + 1) != (len(_channels) - 1) or output_activation else None, # if the model is single Conv1dBlock check if we want activation function on the output
                     normalization[i], #if (i + 1) != (len(channels) - 1) else False, #
-                    self.norm_type
+                    self.norm_type[i]
             ))
 
 
@@ -399,8 +415,11 @@ class ConvUpsampleBlock(torch.nn.Module):
         ret.append(upsample)
         ret.append(conv)
         if norm:
-            if norm_type.__name__ == "LayerNorm":
+            if module_name(norm_type) == "LayerNorm":
                 norm_layer = norm_type(list(self.__component_output_sz(conv, self.output_size)[1:]))
+            elif module_name(norm_type) == "GroupNorm":
+                comp_out = self.__component_output_sz(conv, self.output_size)
+                norm_layer = norm_type(num_channels=comp_out[1])
             else:
                 norm_layer = norm_type(out_channels)
             ret.append(norm_layer)
