@@ -87,6 +87,7 @@ namespace butane {
             void append(const torch::Tensor& data, boost::optional<const torch::Tensor&> targets = boost::none)
             {
                 if (_data.sizes()[0] == 0) {
+                    _device = data.device();
                     _data = data.detach().clone();
                 }
                 else {
@@ -113,6 +114,7 @@ namespace butane {
             void move(torch::Tensor& data, boost::optional<torch::Tensor&> targets = boost::none)
             {
                 if (size() == 0) {
+                    _device = data.device();
                     _data = std::move(data);
                 }
                 else {
