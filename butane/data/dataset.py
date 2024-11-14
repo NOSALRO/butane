@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Self
 import torch
 
 class Dataset(torch.utils.data.Dataset):
@@ -21,6 +21,24 @@ class Dataset(torch.utils.data.Dataset):
             }
         else:
             return { "data": self.data[idx] }
+
+    def _split(self, percentage: float):
+        indices = torch.randperm(self.data.size(0))
+        num_el_after_split = int(percentage * self.data.size(0))
+
+        split_2_data = self.data[indices[num_el_after_split:]]
+        if self._has_targets:
+            split_2_targets = self.targets[indices[num_el_after_split:]]
+
+        split_1_data = self.data[indices[:num_el_after_split]]
+        if self._has_targets:
+            split_1_targets = self.targets[indices[:num_el_after_split]]
+        return (split_1_data, split_1_targets if self._has_targets else None), (split_2_data, split_2_targets if self._has_targets else None)
+
+    def split(self, percentage: float):
+        (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage)
+        self.__init__(split_1_data, split_1_targets)
+        return Dataset(split_2_data, split_2_targets)
 
     def flatten(self, dim: int = 1) -> None:
         self.data = self.data.flatten(start_dim=dim)
@@ -107,9 +125,17 @@ class TrajectoryDataset(Dataset):
         seq_future = self.data[traj_index, (step_index + self.horizon): step_index + 2*self.horizon]
         return {"data": seq_current, "target": seq_future}
 
+    def split(self, percentage: float):
+        (split_1_data, _), (split_2_data, _) = self._split(percentage)
+        self.__init__(split_1_data, horizon=self.horizon, loop=self._loop)
+        return TrajectoryDataset(split_2_data, horizon=self.horizon, loop=self._loop)
+
     def __prepare_data(self):
         if not self._loop:
             self.data = torch.cat([self.data, self.data[:, [-1], :].repeat(1, 2*self.horizon, 1)], dim=1)
         else:
-            self.data = torch.cat([self.data, self.data[:, :self.horizon, :].repeat(1, 2, 1)], dim=1)
+            if self.horizon * 2 >= self.num_steps:
+                self.data = torch.cat([self.data, self.data[:, :self.horizon, :].repeat(1, 2, 1)], dim=1)
+            else:
+                self.data = torch.cat([self.data, self.data[:, :2*self.horizon, :]], dim=1)
         self._is_data_prepared = True

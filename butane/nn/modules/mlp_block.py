@@ -1,4 +1,4 @@
-from typing import TypeAlias, Union, Optional
+from typing import TypeAlias, Union, Optional, Self
 import math
 import copy
 import torch
@@ -23,7 +23,7 @@ class MLPBlock(torch.nn.Sequential):
         assert input_dims is not None and output_dims is not None, "Input or Ouput dims cannot be none!"
 
         super().__init__()
-        self.mlp = torch.nn.Sequential()
+        self.mlp = torch.nn.ModuleList()
 
         _hidden_dims = copy.deepcopy(hidden_dims)
         _hidden_dims.insert(0, input_dims)
@@ -51,7 +51,16 @@ class MLPBlock(torch.nn.Sequential):
             self.mlp.extend(_architecture)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.mlp(x)
+        if isinstance(self.mlp, torch.nn.ModuleList):
+            for layer in self.mlp:
+                x = layer(x)
+        elif isinstance(self.mlp, torch.nn.Sequential):
+            x = self.mlp(x)
+        return x
+
+    def sequential(self) -> Self:
+        self.mlp = torch.nn.Sequential(*self.mlp)
+        return self
 
 class ProbabilisticMLPBlock(torch.nn.Sequential):
 
@@ -69,7 +78,7 @@ class ProbabilisticMLPBlock(torch.nn.Sequential):
         assert input_dims is not None and output_dims is not None, "Input or Ouput dims cannot be none!"
 
         super().__init__()
-        self.mlp = torch.nn.Sequential()
+        self.probabilistic_mlp = torch.nn.ModuleList()
 
         _hidden_dims = copy.deepcopy(hidden_dims)
         _hidden_dims.insert(0, input_dims)
@@ -90,18 +99,36 @@ class ProbabilisticMLPBlock(torch.nn.Sequential):
             if dropout[i] != 0.:
                 _architecture.append(torch.nn.Dropout(dropout[i]))
 
-        self.mlp.extend(_architecture)
+        self.probabilistic_mlp.extend(_architecture)
 
-        self.mu = torch.nn.Sequential(
+        self.mu = torch.nn.ModuleList([
             torch.nn.Linear(_hidden_dims[-2], _hidden_dims[-1], bias = bias[-1]),
-            activation_function[-1])
+            activation_function[-1]])
 
-        self.logvar = torch.nn.Sequential(
+        self.logvar = torch.nn.ModuleList([
             torch.nn.Linear(_hidden_dims[-2], _hidden_dims[-1], bias = bias[-1]),
-            activation_function[-1])
+            activation_function[-1]])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.mlp(x)
-        mu = self.mu(out)
-        logvar = self.logvar(out)
+        if isinstance(self.probabilistic_mlp, torch.nn.ModuleList):
+            for layer in self.probabilistic_mlp:
+                x = layer(x)
+            mu, logvar = x, x
+            for layer in self.mu:
+                mu = layer(mu)
+
+            for layer in self.logvar:
+                logvar = layer(logvar)
+
+        elif isinstance(self.probabilistic_mlp, torch.nn.Sequential):
+            out = self.probabilistic_mlp(x)
+            mu = self.mu(out)
+            logvar = self.logvar(out)
+
         return mu, logvar
+
+    def sequential(self) -> Self:
+        self.probabilistic_mlp = torch.nn.Sequential(*self.probabilistic_mlp)
+        self.mu = torch.nn.Sequential(*self.mu)
+        self.logvar = torch.nn.Sequential(*self.logvar)
+        return self

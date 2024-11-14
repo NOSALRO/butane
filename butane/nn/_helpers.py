@@ -4,6 +4,8 @@ import torch
 
 
 def module_name(module: Union[torch.nn.Module, functools.partial]) -> str:
+    if module is None:
+        return ''
     if isinstance(module, functools.partial):
         return module.func.__name__
     else:
@@ -66,8 +68,8 @@ def _fill_defaults(
 
     elif len(vector) == size and size_of_item == 0:
         return vector
-    else:
-        raise TypeError("Model configure num params error")
+    # else:
+    #     raise TypeError("Model configure num params error")
 
 def _prod(l: Union[List[Union[int, float]], Tuple[Union[int, float], ...]]) -> Union[float, int]:
     out = 1.
