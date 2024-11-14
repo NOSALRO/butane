@@ -22,19 +22,6 @@ class Dataset(torch.utils.data.Dataset):
         else:
             return { "data": self.data[idx] }
 
-    def _split(self, percentage: float):
-        indices = torch.randperm(self.data.size(0))
-        num_el_after_split = int(percentage * self.data.size(0))
-
-        split_2_data = self.data[indices[num_el_after_split:]]
-        if self._has_targets:
-            split_2_targets = self.targets[indices[num_el_after_split:]]
-
-        split_1_data = self.data[indices[:num_el_after_split]]
-        if self._has_targets:
-            split_1_targets = self.targets[indices[:num_el_after_split]]
-        return (split_1_data, split_1_targets if self._has_targets else None), (split_2_data, split_2_targets if self._has_targets else None)
-
     def split(self, percentage: float):
         (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage)
         self.__init__(split_1_data, split_1_targets)
@@ -93,6 +80,21 @@ class Dataset(torch.utils.data.Dataset):
 
     def targets_ref(self) -> torch.Tensor:
         return self.targets
+
+    def _split(self, percentage: float):
+        split_1_targets = None
+        split_2_targets = None
+        indices = torch.randperm(self.data.size(0))
+        num_el_after_split = int(percentage * self.data.size(0))
+
+        split_2_data = self.data[indices[num_el_after_split:]]
+        split_1_data = self.data[indices[:num_el_after_split]]
+
+        if self._has_targets:
+            split_1_targets = self.targets[indices[:num_el_after_split]]
+            split_2_targets = self.targets[indices[num_el_after_split:]]
+        return (split_1_data, split_1_targets), (split_2_data, split_2_targets)
+
 
 class TrajectoryDataset(Dataset):
 

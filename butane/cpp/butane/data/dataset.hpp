@@ -22,9 +22,11 @@ namespace butane {
             {
                 _data = data.detach().clone();
                 _data = _data.toType(torch::kFloat32);
-                if (targets) {
-                    _targets = targets.value().detach().clone();
-                    _has_targets = true;
+                if (targets ) {
+                    if (targets.value().numel() != 0) {
+                        _targets = targets.value().detach().clone();
+                        _has_targets = true;
+                    }
                 }
             }
 
@@ -139,6 +141,20 @@ namespace butane {
                     }
                 }
             }
+
+            Dataset split(double percentage)
+            {
+                auto [split_1_data, split_1_targets, split_2_data, split_2_targets] = _split(percentage);
+                if (_has_targets) {
+                    *this = Dataset(split_1_data, split_1_targets);
+                    return Dataset(split_2_data, split_2_targets);
+                }
+                else {
+                    *this = Dataset(split_1_data);
+                    return Dataset(split_2_data);
+                }
+            }
+
             const std::vector<int64_t> sizes() const { return _data.sizes().vec(); }
             const int size() const { return _data.size(0); }
             int numel() const { return torch::tensor(_data.sizes()).prod().item<int>(); }
@@ -153,6 +169,28 @@ namespace butane {
             bool _has_targets = false;
             int _numel = 0;
             torch::Device _device = torch::kCPU;
+
+            std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> _split(double percentage)
+            {
+                torch::Tensor split_1_targets = torch::Tensor();
+                torch::Tensor split_2_targets = torch::Tensor();
+
+                torch::Tensor indices = torch::randperm(_data.size(0));
+                double num_el_after_split = static_cast<int>(percentage * _data.size(0));
+
+                torch::Tensor split_1_idxs = indices.index({torch::indexing::Slice(torch::indexing::None, num_el_after_split)});
+                torch::Tensor split_2_idxs = indices.index({torch::indexing::Slice(num_el_after_split)});
+
+                torch::Tensor split_1_data = _data.index({split_1_idxs});
+                torch::Tensor split_2_data = _data.index({split_2_idxs});
+
+                if (_has_targets) {
+                    split_1_targets = _targets.index({split_1_idxs});
+                    split_2_targets = _targets.index({split_2_idxs});
+                }
+
+                return {split_1_data, split_1_targets, split_2_data, split_2_targets};
+            }
         };
     } // namespace data
 } // namespace butane
