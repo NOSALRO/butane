@@ -12,6 +12,7 @@ int main(int argc, char** argv)
     ds.to(dev);
     butane::data::ops::sparsify(ds);
     butane::data::ops::drop_to_max_size(ds, 30000);
+    butane::data::Dataset test_ds = ds.split(.7);
 
     std::cout << ds.get(torch::arange(3)).data.sizes() << std::endl;
     std::cout << ds.get(torch::arange(3)).target.sizes() << std::endl;
