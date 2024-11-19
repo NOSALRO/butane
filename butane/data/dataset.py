@@ -1,5 +1,6 @@
-from typing import Optional, List, Tuple, Dict, Self
+from typing import Optional, List, Tuple, Dict, Self, Union
 import torch
+from ._utils import batch_arange
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(
@@ -121,6 +122,9 @@ class TrajectoryDataset(Dataset):
         if not self._is_data_prepared:
             self.__prepare_data()
 
+        if not isinstance(idx, int):
+            return self.__batched_get(idx)
+
         traj_index = idx // self.num_steps
         step_index = idx % self.num_steps
         seq_current = self.data[traj_index, step_index: step_index + self.horizon]
@@ -141,3 +145,28 @@ class TrajectoryDataset(Dataset):
             else:
                 self.data = torch.cat([self.data, self.data[:, :2*self.horizon, :]], dim=1)
         self._is_data_prepared = True
+
+    def __batched_get(self, idxs: Union[slice, list]):
+        idx_list = None
+        if isinstance(idxs, slice):
+            start = idxs.start
+            start = 0 if start is None else start
+
+            stop = idxs.stop
+            stop = self.num_trajectories if stop is None else stop
+
+            step = idxs.step
+            step = 1 if step is None else step
+            idx_list = torch.arange(start, stop, step)
+        else:
+            idx_list = torch.tensor(idxs)
+
+        traj_idx_list = (idx_list // self.num_steps).unsqueeze(-1)
+        step_idx_list = idx_list % self.num_steps
+        step_idx_list_data = batch_arange(step_idx_list, step_idx_list + self.horizon)
+        step_idx_list_target = batch_arange(step_idx_list + self.horizon, step_idx_list + 2*self.horizon)
+
+        return {
+            "data": self.data[traj_idx_list, step_idx_list_data],
+            "target": self.data[traj_idx_list, step_idx_list_target]
+        }

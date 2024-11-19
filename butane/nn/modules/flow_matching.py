@@ -32,20 +32,27 @@ class ConditionalFlowMatching(torch.nn.Module):
         model: torch.nn.Module,
         x: torch.Tensor,
         timesteps: int,
-        condition: Optional[torch.Tensor] = None
+        condition: Optional[torch.Tensor] = None,
+        history: Optional[bool] = False
     ) -> torch.Tensor:
         model.eval()
 
+        history = []
         t_span = torch.linspace(0, 1, timesteps).to(self._dummy_param.device)
         if condition is not None:
             condition = condition.to(self._dummy_param.device)
         x = x.to(self._dummy_param.device)
+        history.append(x.unsqueeze(0))
         dt = t_span[1:] - t_span[:-1]
         t = t_span[0]
 
         for step in range(0, len(t_span)-1):
             v_t = model(x, t.repeat(x.size(0)).reshape(-1,1), condition)
             x = x + v_t * dt[step]
+            history.append(x.unsqueeze(0))
             t += dt[step]
         model.train()
-        return x
+        if history:
+            return torch.vstack(history)
+        else:
+            return x
