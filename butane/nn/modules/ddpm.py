@@ -20,8 +20,8 @@ class DDPM(torch.nn.Module):
         if scheduler == 'linear':
             self.beta_linear_scheduler()
 
-    def sample_timesteps(self, n: int) -> None:
-        return torch.randint(0, self._timesteps.size(0), size=(n, 1), device=self._dummy_param.device)
+    def sample_timesteps(self, n: int) -> torch.Tensor:
+        return torch.randint(0, self._timesteps.size(0), size=(n, 1), device=self._dummy_param.device, dtype=torch.int64)
 
     def beta_cosine_scheduler(self, s: Optional[float] = 0.008) -> None:
         timesteps = torch.arange(len(self._timesteps) + 1).float()
