@@ -51,70 +51,106 @@ conv_upsample_config = {
 class TestConvBlocks(unittest.TestCase):
 
     def test_conv_1d_block(self):
-        self.assertTrue(butane.nn.Conv1dBlock(
+        model = butane.nn.Conv1dBlock(
             input_dims = [1, 28],
             pool = [torch.nn.MaxPool1d, torch.nn.AvgPool1d],
             normalization_type = [torch.nn.BatchNorm1d, torch.nn.LayerNorm],
             **conv_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
     def test_conv_2d_block(self):
-        self.assertTrue(butane.nn.Conv2dBlock(
+        model = butane.nn.Conv2dBlock(
             input_dims = [1, 28, 28],
             pool = [torch.nn.MaxPool2d, torch.nn.AvgPool2d],
             normalization_type = [torch.nn.BatchNorm2d, torch.nn.LayerNorm],
             **conv_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
     def test_conv_3d_block(self):
-        self.assertTrue(butane.nn.Conv3dBlock(
+        model = butane.nn.Conv3dBlock(
             input_dims = [1, 28, 28, 28],
             pool = [torch.nn.MaxPool3d, torch.nn.AvgPool3d],
             normalization_type = [torch.nn.BatchNorm3d, torch.nn.LayerNorm],
             **conv_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28, 28, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
     def test_conv_transpose_1d_block(self):
-        self.assertTrue(butane.nn.ConvTranspose1dBlock(
+        model = butane.nn.ConvTranspose1dBlock(
             input_dims = [1, 28],
             normalization_type = [torch.nn.BatchNorm1d, torch.nn.LayerNorm],
             **conv_transpose_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
     def test_conv_transpose_2d_block(self):
-        self.assertTrue(butane.nn.ConvTranspose2dBlock(
+        model = butane.nn.ConvTranspose2dBlock(
             input_dims = [1, 28, 28],
             normalization_type = [torch.nn.BatchNorm2d, torch.nn.LayerNorm],
             **conv_transpose_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
     def test_conv_transpose_3d_block(self):
-        self.assertTrue(butane.nn.ConvTranspose3dBlock(
+        model = butane.nn.ConvTranspose3dBlock(
             input_dims = [1, 28, 28, 28],
             normalization_type = [torch.nn.BatchNorm3d, torch.nn.LayerNorm],
             **conv_transpose_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28, 28, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
     def test_conv_upsample_1d_block(self):
-        self.assertTrue(butane.nn.ConvUpsample1dBlock(
+        model = butane.nn.ConvUpsample1dBlock(
             input_dims = [1, 28],
-            normalization_type = [torch.nn.BatchNorm1d, torch.nn.LayerNorm],
+            normalization_type = [torch.nn.BatchNorm1d, torch.nn.BatchNorm1d],
             **conv_upsample_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
     def test_conv_upsample_2d_block(self):
-        self.assertTrue(butane.nn.ConvUpsample2dBlock(
+        model = butane.nn.ConvUpsample2dBlock(
             input_dims = [1, 28, 28],
-            normalization_type = [torch.nn.BatchNorm2d, torch.nn.LayerNorm],
+            normalization_type = [torch.nn.BatchNorm2d, torch.nn.BatchNorm2d],
             **conv_upsample_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
     def test_conv_upsample_3d_block(self):
-        self.assertTrue(butane.nn.ConvUpsample3dBlock(
+        model = butane.nn.ConvUpsample3dBlock(
             input_dims = [1, 28, 28, 28],
-            normalization_type = [torch.nn.BatchNorm3d, torch.nn.LayerNorm],
+            normalization_type = [torch.nn.BatchNorm3d, torch.nn.BatchNorm3d],
             **conv_upsample_config
-        ))
+        )
+        self.assertTrue(model)
+        self.assertIsInstance(model(torch.randn(1, 1, 28, 28, 28)), torch.Tensor)
+        self.assertTrue(model.sequential())
+        self.assertIsInstance(model.output_size, torch.Tensor)
 
 if __name__ == '__main__':
     unittest.main()

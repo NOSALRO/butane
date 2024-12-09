@@ -135,17 +135,24 @@ class ConvBlock(ConvBlockBase):
                     self.norm_type[i]
             ))
 
+    def module_list(self):
+        if isinstance(self.conv_block, torch.nn.ModuleList):
+            return self.conv_block
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if isinstance(self.conv_block, torch.nn.ModuleList):
-            for layer in self.conv_block:
-                x = layer(x)
+            x = self._forward_module_list(self.conv_block, x)
         elif isinstance(self.conv_block, torch.nn.Sequential):
-            x = self.conv_block(x)
+            x = self._forward_sequential(self.conv_block, x)
         return x
 
     def sequential(self) -> Self:
         self.conv_block = torch.nn.Sequential(*self.conv_block)
         return self
+
+    def __iter__(self):
+        for module in self.conv_block:
+            yield module
 
     def __create_subblock(
         self,
@@ -247,7 +254,7 @@ class ConvTransposeBlock(ConvBlockBase):
         _channels = copy.copy(channels)
         _channels.insert(0, input_dims[0])
 
-        self.conv_transpose_block = torch.nn.Sequential()
+        self.conv_transpose_block = torch.nn.ModuleList()
         for i in range(len(_channels) - 1):
             self.conv_transpose_block.extend(
                 self.__create_subblock(
@@ -264,9 +271,24 @@ class ConvTransposeBlock(ConvBlockBase):
                     self.norm_type[i]
             ))
 
+    def module_list(self):
+        if isinstance(self.conv_transpose_block, torch.nn.ModuleList):
+            return self.conv_transpose_block
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv_transpose_block(x)
+        if isinstance(self.conv_transpose_block, torch.nn.ModuleList):
+            x = self._forward_module_list(self.conv_transpose_block, x)
+        elif isinstance(self.conv_transpose_block, torch.nn.Sequential):
+            x = self._forward_sequential(self.conv_transpose_block, x)
+        return x
+
+    def sequential(self) -> Self:
+        self.conv_transpose_block = torch.nn.Sequential(*self.conv_transpose_block)
+        return self
+
+    def __iter__(self):
+        for module in self.conv_transpose_block:
+            yield module
 
     def __create_subblock(
         self,
@@ -373,7 +395,7 @@ class ConvUpsampleBlock(ConvBlockBase):
         _channels = copy.copy(channels)
         _channels.insert(0, input_dims[0])
 
-        self.conv_upsample_block = torch.nn.Sequential()
+        self.conv_upsample_block = torch.nn.ModuleList()
         for i in range(len(_channels) - 1):
             self.conv_upsample_block.extend(
                 self.__create_subblock(
@@ -394,9 +416,24 @@ class ConvUpsampleBlock(ConvBlockBase):
                     self.norm_type[i]
             ))
 
+    def module_list(self):
+        if isinstance(self.conv_upsample_block, torch.nn.ModuleList):
+            return self.conv_upsample_block
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv_upsample_block(x)
+        if isinstance(self.conv_upsample_block, torch.nn.ModuleList):
+            x = self._forward_module_list(self.conv_upsample_block, x)
+        elif isinstance(self.conv_upsample_block, torch.nn.Sequential):
+            x = self._forward_sequential(self.conv_upsample_block, x)
+        return x
+
+    def sequential(self) -> Self:
+        self.conv_upsample_block = torch.nn.Sequential(*self.conv_upsample_block)
+        return self
+
+    def __iter__(self):
+        for module in self.conv_upsample_block:
+            yield module
 
     def __create_subblock(
         self,
