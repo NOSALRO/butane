@@ -1,6 +1,8 @@
 from typing import Optional, Callable, Union, Tuple
 import torch
 
+from ...math.ode import *
+
 
 class ConditionalFlowMatching(torch.nn.Module):
 
@@ -13,6 +15,11 @@ class ConditionalFlowMatching(torch.nn.Module):
     def sample_timesteps(self, n):
         return torch.rand(n, 1).to(self._dummy_param.device)
 
+    def sample_xt(self, x0, x1, t):
+        t = t.reshape(-1, *([1] * (x0.dim() - 1)))
+        mu_t = t * x1 + (1 - t) * x0
+        return mu_t + self._sigma * epsilon
+
     def forward(
         self,
         x0: torch.Tensor,
@@ -22,34 +29,46 @@ class ConditionalFlowMatching(torch.nn.Module):
 
         while len(x0.size()) != len(t.size()):
             t = t[..., None]
-        x_t = (1 - (1 - self._sigma) * t) * x0 + (t * x1)
-        u_t = x1 - x0 * (1 - self._sigma)
+        x_t = (t * x1) + (1-t)*x0
+        epsilon = torch.randn_like(x0)
+        x_t = x_t + self._sigma * epsilon
+        u_t = x1 - x0
         return x_t, u_t
 
     @torch.no_grad()
     def sample(
         self,
         model: torch.nn.Module,
-        x: torch.Tensor,
+        x_dims: torch.Tensor,
+        sample_fn: Callable,
         timesteps: int,
         condition: Optional[torch.Tensor] = None,
-        keep_record: Optional[bool] = False
+        keep_record: Optional[bool] = False,
+        n_samples_per_condition: int = 1,
+        solver: Optional[str] = 'rk4'
     ) -> torch.Tensor:
+
+        solver = rk4
+        if solver == 'euler':
+            solver = euler_explicit
         model.eval()
-
-        _record = []
-        t_span = torch.linspace(0, 1, timesteps).to(self._dummy_param.device)
-        if condition is not None:
-            condition = condition.to(self._dummy_param.device)
-        x = x.to(self._dummy_param.device)
-        _record.append(x.unsqueeze(0))
-        dt = t_span[1:] - t_span[:-1]
-        t = t_span[0]
-
-        for step in range(0, len(t_span)-1):
-            v_t = model(x, t.repeat(x.size(0)).reshape(-1,1), condition)
-            x = x + v_t * dt[step]
+        out = []
+        for _ in range(n_samples_per_condition):
+            _record = []
+            x = sample_fn(*x_dims)
+            t_span = torch.linspace(0, 1, timesteps).to(self._dummy_param.device)
+            if condition is not None:
+                condition = condition.to(self._dummy_param.device)
+            x = x.to(self._dummy_param.device)
             _record.append(x.unsqueeze(0))
-            t += dt[step]
+            dt = t_span[1:] - t_span[:-1]
+            t = t_span[0]
+
+            for step in range(0, len(t_span)-1):
+                x = x + rk4(model, dt[step], x, t.repeat(x.size(0)).reshape(-1,1), condition)
+                _record.append(x.unsqueeze(0))
+                t += dt[step]
+            res = torch.vstack(_record) if keep_record else x
+            out.append(res.unsqueeze(0))
         model.train()
-        return torch.vstack(_record) if keep_record else x
+        return torch.vstack(out).squeeze(0)

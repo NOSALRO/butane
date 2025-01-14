@@ -1,7 +1,8 @@
 from butane import (
     nn as nn,
     data as data,
-    clustering as clustering
+    clustering as clustering,
+    math as math
 )
 
 from butane.nn import (
