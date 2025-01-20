@@ -15,11 +15,6 @@ class ConditionalFlowMatching(torch.nn.Module):
     def sample_timesteps(self, n):
         return torch.rand(n, 1).to(self._dummy_param.device)
 
-    def sample_xt(self, x0, x1, t):
-        t = t.reshape(-1, *([1] * (x0.dim() - 1)))
-        mu_t = t * x1 + (1 - t) * x0
-        return mu_t + self._sigma * epsilon
-
     def forward(
         self,
         x0: torch.Tensor,
@@ -29,9 +24,9 @@ class ConditionalFlowMatching(torch.nn.Module):
 
         while len(x0.size()) != len(t.size()):
             t = t[..., None]
-        x_t = (t * x1) + (1-t)*x0
+        mu_t = t * x1 + (1 - t) * x0
         epsilon = torch.randn_like(x0)
-        x_t = x_t + self._sigma * epsilon
+        x_t = mu_t + self._sigma * epsilon
         u_t = x1 - x0
         return x_t, u_t
 
@@ -48,9 +43,9 @@ class ConditionalFlowMatching(torch.nn.Module):
         solver: Optional[str] = 'rk4'
     ) -> torch.Tensor:
 
-        solver = rk4
+        _solver = rk4
         if solver == 'euler':
-            solver = euler_explicit
+            _solver = euler_explicit
         model.eval()
         out = []
         for _ in range(n_samples_per_condition):
@@ -65,7 +60,7 @@ class ConditionalFlowMatching(torch.nn.Module):
             t = t_span[0]
 
             for step in range(0, len(t_span)-1):
-                x = x + rk4(model, dt[step], x, t.repeat(x.size(0)).reshape(-1,1), condition)
+                x = x + _solver(model, dt[step], x, t.repeat(x.size(0)).reshape(-1,1), condition)
                 _record.append(x.unsqueeze(0))
                 t += dt[step]
             res = torch.vstack(_record) if keep_record else x
