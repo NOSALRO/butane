@@ -19,6 +19,10 @@ class DDPM(torch.nn.Module):
         self._dummy_param = torch.nn.Parameter(torch.empty(0))
         if scheduler == 'linear':
             self.beta_linear_scheduler()
+        elif scheduler == 'cosine':
+            self.beta_cosine_scheduler()
+        else:
+            raise ValueError(f"Unsupported scheduler type: {scheduler}")
 
     def sample_timesteps(self, n: int) -> torch.Tensor:
         return torch.randint(0, self._timesteps.size(0), size=(n, 1), device=self._dummy_param.device, dtype=torch.int64)

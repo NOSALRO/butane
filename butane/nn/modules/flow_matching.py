@@ -34,7 +34,7 @@ class ConditionalFlowMatching(torch.nn.Module):
     def sample(
         self,
         model: torch.nn.Module,
-        x_dims: torch.Tensor,
+        dims: torch.Tensor,
         sample_fn: Callable,
         timesteps: int,
         condition: Optional[torch.Tensor] = None,
@@ -48,9 +48,9 @@ class ConditionalFlowMatching(torch.nn.Module):
             _solver = euler_explicit
         model.eval()
         out = []
-        for _ in range(n_samples_per_condition):
+        for _ in range(n_samples_per_condition if condition is not None else 1):
             _record = []
-            x = sample_fn(*x_dims)
+            x = sample_fn(*dims)
             t_span = torch.linspace(0, 1, timesteps).to(self._dummy_param.device)
             if condition is not None:
                 condition = condition.to(self._dummy_param.device)

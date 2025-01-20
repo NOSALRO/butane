@@ -25,7 +25,7 @@ class StandardScaler(torch.nn.Module):
         if isinstance(x, Dataset):
             data = x[:]["data"]
         else:
-            data = x[:]
+            data = x
 
         if isinstance(self.mu, torch.nn.UninitializedBuffer):
             return data
@@ -38,7 +38,7 @@ class StandardScaler(torch.nn.Module):
         if isinstance(x, Dataset):
             data = x[:]["data"]
         else:
-            data = x[:]
+            data = x
 
         if isinstance(self.mu, torch.nn.UninitializedBuffer):
             return data
@@ -60,7 +60,7 @@ class MinMaxScaler(torch.nn.Module):
         if isinstance(X, Dataset):
             data = X[:]["data"]
         else:
-            data = X[:]
+            data = X
         data = data if transforms is None else transforms(data)
         self.x_min = torch.nn.Buffer(torch.min(data, 0, keepdim=True).values)
         self.x_max = torch.nn.Buffer(torch.max(data, 0, keepdim=True).values)
@@ -69,7 +69,7 @@ class MinMaxScaler(torch.nn.Module):
         if isinstance(x, Dataset):
             data = x[:]["data"]
         else:
-            data = x[:]
+            data = x
 
         if isinstance(self.x_min, torch.nn.UninitializedBuffer):
             return data
@@ -82,7 +82,7 @@ class MinMaxScaler(torch.nn.Module):
         if isinstance(x, Dataset):
             data = x[:]["data"]
         else:
-            data = x[:]
+            data = x
 
         if isinstance(self.x_min, torch.nn.UninitializedBuffer):
             return data
