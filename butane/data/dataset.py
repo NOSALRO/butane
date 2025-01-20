@@ -1,6 +1,7 @@
 from typing import Optional, List, Tuple, Dict, Self, Union
 import torch
 from ._utils import batch_arange
+from .transforms import Transforms
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(
@@ -13,15 +14,25 @@ class Dataset(torch.utils.data.Dataset):
         self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
         self._has_targets = targets is not None
         self._device = torch.device('cpu')
+        self._transforms, self._vectorized_transforms = None, None
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        if self._has_targets:
-            return {
-                "data": self.data[idx],
-                "targets": self.targets[idx]
-            }
+    def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
+        if isinstance(idx, int):
+            if self._has_targets:
+                return {
+                    "data": self.data[idx] if self._transforms is None else self._transforms(self.data[idx]),
+                    "targets": self.targets[idx]
+                }
+            else:
+                return { "data": self.data[idx] if self._transforms is None else self._transforms(self.data[idx]) }
         else:
-            return { "data": self.data[idx] }
+            if self._has_targets:
+                return {
+                    "data": self.data[idx] if self._transforms is None else self._vectorized_transforms(self.data[idx]),
+                    "targets": self.targets[idx]
+                }
+            else:
+                return { "data": self.data[idx] if self._transforms is None else self._vectorized_transforms(self.data[idx]) }
 
     def split(self, percentage: float):
         (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage)
@@ -74,6 +85,10 @@ class Dataset(torch.utils.data.Dataset):
         if self._has_targets:
             self.targets = self.targets[mask]
 
+    def set_transforms(self, transforms: Transforms):
+        self._transforms = transforms
+        self._vectorized_transforms = torch.vmap(transforms)
+
     def sizes(self) -> List[int]:
         return list(self.data.size())
 
@@ -125,7 +140,6 @@ class TrajectoryDataset(Dataset):
         return self.data.size(0) * self.num_steps
 
     def __getitem__(self, idx: int) -> torch.Tensor:
-
         if not self._is_data_prepared:
             self.__prepare_data()
 
@@ -136,7 +150,8 @@ class TrajectoryDataset(Dataset):
         step_index = idx % self.num_steps
         seq_current = self.data[traj_index, step_index: step_index + self.horizon]
         seq_future = self.data[traj_index, (step_index + self.horizon): step_index + 2*self.horizon]
-        return {"data": seq_current, "target": seq_future}
+        return {"data": seq_current if self._transforms is None else self._transforms(seq_current),
+                "target": seq_future if self._transforms is None else self._transforms(seq_future)}
 
     def split(self, percentage: float):
         (split_1_data, _), (split_2_data, _) = self._split(percentage)
@@ -174,6 +189,8 @@ class TrajectoryDataset(Dataset):
         step_idx_list_target = batch_arange(step_idx_list + self.horizon, step_idx_list + 2*self.horizon)
 
         return {
-            "data": self.data[traj_idx_list, step_idx_list_data],
-            "target": self.data[traj_idx_list, step_idx_list_target]
+            "data": self.data[traj_idx_list, step_idx_list_data] if self._transforms is None
+                else self._vectorized_transforms(self.data[traj_idx_list, step_idx_list_data]),
+            "target": self.data[traj_idx_list, step_idx_list_target] if self._transforms is None
+                    else self._vectorized_transforms(self.data[traj_idx_list, step_idx_list_target])
         }
