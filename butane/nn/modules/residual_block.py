@@ -18,12 +18,12 @@ def conv_def(conv_type: str):
         return cls
     return inner
 
-class ResidualBlock(torch.nn.Module):
+class ResidualBlock(ConvBlockBase):
 
     def __init__(
         self,
         input_dims: IntParams,
-        channels: IntParams = [32, 64],
+        channels: int = 32,
         *,
         activation_function: torch.nn.Module = torch.nn.ReLU(),
         conv_kernels: Optional[int] = 3,
@@ -47,6 +47,8 @@ class ResidualBlock(torch.nn.Module):
         normalization = _fill_defaults(normalization, 2)
 
         self.pool = None
+        self.input_dims = input_dims
+        self.residual_block = torch.nn.ModuleList()
         self.conv_module = self.conv(
             input_dims = input_dims,
             channels = [channels, channels],
@@ -61,6 +63,7 @@ class ResidualBlock(torch.nn.Module):
             normalization_type = [normalization_type],
             normalization = [normalization[0], normalization[1]]
         )
+        self.residual_block.append(self.conv_module)
 
         self.shortcut = torch.nn.Identity()
         if conv_stride != 1 or input_dims[0] != channels:
@@ -75,15 +78,17 @@ class ResidualBlock(torch.nn.Module):
                 normalization = shortcut_normalization,
                 normalization_type = shortcut_normalization_type,
             )
+            self.residual_block.append(self.shortcut)
 
         if pool is not None:
             self.pool = pool(kernel_size=pool_kernels, stride=pool_stride, padding=pool_pad)
+            self.residual_block.append(self.pool)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.conv_module(x)
-        out += self.shortcut(x)
+        out = self.residual_block[0](x)
+        out += self.residual_block[1](x)
         if self.pool is not None:
-            out = self.pool(out)
+            out = self.residual_block[2](out)
         return out
 
 @conv_def('1d')
