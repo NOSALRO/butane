@@ -34,7 +34,7 @@ class ConditionalFlowMatching(torch.nn.Module):
     def sample(
         self,
         model: torch.nn.Module,
-        dims: torch.Tensor,
+        dims: Union[list[int,...], tuple[int], torch.Tensor],
         sample_fn: Callable,
         timesteps: int,
         condition: Optional[torch.Tensor] = None,
@@ -43,27 +43,31 @@ class ConditionalFlowMatching(torch.nn.Module):
         solver: Optional[str] = 'rk4'
     ) -> torch.Tensor:
 
+        model.eval()
         _solver = rk4
         if solver == 'euler':
             _solver = euler_explicit
-        model.eval()
-        out = []
+
+        if condition is not None:
+            condition = condition.to(self._dummy_param.device)
+
+        generated = []
         for _ in range(n_samples_per_condition if condition is not None else 1):
             _record = []
             x = sample_fn(*dims)
             t_span = torch.linspace(0, 1, timesteps).to(self._dummy_param.device)
-            if condition is not None:
-                condition = condition.to(self._dummy_param.device)
             x = x.to(self._dummy_param.device)
-            _record.append(x.unsqueeze(0))
+            if keep_record:
+                _record.append(x.unsqueeze(0))
             dt = t_span[1:] - t_span[:-1]
             t = t_span[0]
 
             for step in range(0, len(t_span)-1):
                 x = x + _solver(model, dt[step], x, t.repeat(x.size(0)).reshape(-1,1), condition)
-                _record.append(x.unsqueeze(0))
+                if keep_record:
+                    _record.append(x.unsqueeze(0))
                 t += dt[step]
-            res = torch.vstack(_record) if keep_record else x
-            out.append(res.unsqueeze(0))
+            generated_i = torch.vstack(_record) if keep_record else x
+            generated.append(generated_i.unsqueeze(0))
         model.train()
-        return torch.vstack(out).squeeze(0)
+        return torch.vstack(generated).squeeze(0)
