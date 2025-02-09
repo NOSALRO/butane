@@ -1,7 +1,6 @@
-import copy
-from typing import TypeAlias, Union, Optional
+from typing import Optional
 import torch
-from .._typedefs import *
+
 
 class LearnableEmbeddings(torch.nn.Module):
 

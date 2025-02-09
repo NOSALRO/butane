@@ -2,7 +2,7 @@ import math
 import copy
 from typing import Optional, Callable, Tuple
 from ..modules import *
-from .._typedefs import *
+from ..._typedefs import *
 import torch
 
 def get_double_conv(in_channels: int, out_channels: int) -> torch.nn.Module:

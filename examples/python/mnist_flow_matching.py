@@ -66,7 +66,7 @@ if __name__ == "__main__":
         output_activation = False,
         normalization = [False, False])
 
-    mlp = torch.nn.Sequential(c_enc, torch.nn.Flatten(1), mlp_enc, mlp_dec, butane.nn.Unflatten(1, c_enc.output_size), c_dec)
+    mlp = torch.nn.Sequential(c_enc, torch.nn.Flatten(1), mlp_enc, mlp_dec, butane.nn.utils.Unflatten(1, c_enc.output_size), c_dec)
     model = butane.nn.wrappers.TimeDependent(mlp).to(dev)
     fm = butane.nn.ConditionalFlowMatching(0.01).to(dev)
     optimizer = torch.optim.AdamW(model.parameters(), lr=7e-4)

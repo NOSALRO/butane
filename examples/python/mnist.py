@@ -50,7 +50,7 @@ if __name__ == "__main__":
     quantizer.affine_transform.set_num_groups(2)
 
     encoder = torch.nn.Sequential(c_enc, torch.nn.Flatten(1), mlp_enc)
-    decoder = torch.nn.Sequential(mlp_dec, butane.nn.Unflatten(1, c_enc.output_size), c_dec)
+    decoder = torch.nn.Sequential(mlp_dec, butane.nn.utils.Unflatten(1, c_enc.output_size), c_dec)
     model = butane.nn.MLVQVAE(encoder, decoder, quantizer).to(dev)
     print(model)
 
