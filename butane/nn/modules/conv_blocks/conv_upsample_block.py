@@ -3,7 +3,7 @@ import copy
 import torch
 
 from ...._typedefs import *
-from ...._helpers import _fill_defaults, conv_def, _prod, module_name
+from ...._helpers import _fill_defaults, _prod, module_name
 from .conv_base_block import ConvBlockBase
 from ._conv_utils import define_Nd_convolution
 

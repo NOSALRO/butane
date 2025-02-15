@@ -7,3 +7,5 @@ from .attention import *
 from .generative import *
 from .embeddings import *
 from .ema import *
+from .shape_manipulation import *
+from .ensemble import *

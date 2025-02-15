@@ -1,7 +1,7 @@
 from typing import Optional, List, Tuple, Dict, Self, Union
 import torch
 
-from .dataset import *
+from .datasets.dataset import Dataset
 from .transforms import Transforms
 
 

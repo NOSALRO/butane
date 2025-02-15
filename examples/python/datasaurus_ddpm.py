@@ -42,10 +42,6 @@ class TimeDependentModel(torch.nn.Module):
         # return self.mlp(x + self.time_proj(t))
         return self.mlp(torch.hstack([x, self.time_proj(t)]))
 
-def foo(x):
-    print(x)
-
-
 if __name__ == "__main__":
     dev = torch.device('cuda')
     ds = butane.data.Dataset(dino_dataset(8000))
@@ -82,7 +78,7 @@ if __name__ == "__main__":
         avg_loss = sum_loss / n_batches
         print(f"Epoch {epoch} -> Loss: {avg_loss}")
 
-    sampled_hist = torch.vmap(standard_scaler.reverse)(diffusion.sample(model, torch.randn(1000, 2), keep_record = True)).cpu()
+    sampled_hist = torch.vmap(standard_scaler.reverse)(diffusion.sample(model, [1000, 2], torch.randn, keep_record = True)).cpu()
     plt.ion()
     fig, ax = plt.subplots()
     for i in range(0, len(sampled_hist), 1):
