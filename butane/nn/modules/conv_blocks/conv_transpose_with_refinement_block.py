@@ -5,6 +5,8 @@ import torch
 from ...._typedefs import *
 from ...._helpers import _fill_defaults, _prod, module_name
 from .conv_base_block import ConvBlockBase
+from .conv_block import *
+from .conv_transpose_block import *
 from ._conv_utils import define_Nd_convolution
 
 
