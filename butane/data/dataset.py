@@ -67,6 +67,13 @@ class Dataset(torch.utils.data.Dataset):
                 self.targets = torch.cat([self.targets, targets.detach().clone()], dim=0)
             self._has_targets = True
 
+    def remove(self, idxs):
+        mask = torch.ones((self.data.size(0),), dtype=bool)
+        mask[idxs] = False
+        self.data = self.data[mask]
+        if self._has_targets:
+            self.targets = self.targets[mask]
+
     def sizes(self) -> List[int]:
         return list(self.data.size())
 
@@ -110,12 +117,12 @@ class TrajectoryDataset(Dataset):
         self.data = torch.tensor([]) if data is None else data.detach().clone().float()
         self.horizon = horizon
         self._loop = loop
-        self.num_trajectories, self.num_steps, _ = self.data.shape
+        _, self.num_steps, _ = self.data.shape
         self._device = torch.device('cpu')
         self._is_data_prepared = False
 
     def __len__(self) -> int:
-        return self.num_trajectories * self.num_steps
+        return self.data.size(0) * self.num_steps
 
     def __getitem__(self, idx: int) -> torch.Tensor:
 
@@ -153,7 +160,7 @@ class TrajectoryDataset(Dataset):
             start = 0 if start is None else start
 
             stop = idxs.stop
-            stop = self.num_trajectories if stop is None else stop
+            stop = len(self) if stop is None else stop
 
             step = idxs.step
             step = 1 if step is None else step
