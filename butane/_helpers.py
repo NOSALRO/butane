@@ -1,4 +1,4 @@
-from typing import Optional, Callable, Union, Tuple, List, Any
+from typing import Optional, Union, Tuple, List, Any
 import functools
 import torch
 
@@ -10,35 +10,6 @@ def module_name(module: Union[torch.nn.Module, functools.partial]) -> str:
         return module.func.__name__
     else:
         return module.__name__
-
-def conv_def(conv_type: str, transpose: Optional[bool] = False) -> Callable[object, object]:
-    def inner(cls):
-        if conv_type == '1d':
-            if not transpose:
-                cls.conv = torch.nn.Conv1d
-                cls.pool = torch.nn.MaxPool1d
-            else:
-                cls.conv = torch.nn.ConvTranspose1d
-            cls.norm_type = torch.nn.BatchNorm1d
-            cls.N = 1
-        elif conv_type == '2d':
-            if not transpose:
-                cls.conv = torch.nn.Conv2d
-                cls.pool = torch.nn.MaxPool2d
-            else:
-                cls.conv = torch.nn.ConvTranspose2d
-            cls.norm_type = torch.nn.BatchNorm2d
-            cls.N = 2
-        elif conv_type == '3d':
-            if not transpose:
-                cls.conv = torch.nn.Conv3d
-                cls.pool = torch.nn.MaxPool3d
-            else:
-                cls.conv = torch.nn.ConvTranspose3d
-            cls.norm_type = torch.nn.BatchNorm3d
-            cls.N = 3
-        return cls
-    return inner
 
 def _fill_defaults(
     vector: Union[List[Any], Tuple[Any,...]],

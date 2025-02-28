@@ -1,9 +1,11 @@
-from typing import TypeAlias, Union, Optional, Self
+from typing import Optional
 import math
 import copy
 import torch
-from .._typedefs import *
-from .._helpers import _fill_defaults
+
+from ..._typedefs import *
+from ..._helpers import _fill_defaults
+
 
 class MLPBlock(torch.nn.Sequential):
 
@@ -58,7 +60,7 @@ class MLPBlock(torch.nn.Sequential):
             x = self.mlp(x)
         return x
 
-    def sequential(self) -> Self:
+    def sequential(self):
         self.mlp = torch.nn.Sequential(*self.mlp)
         return self
 
@@ -127,7 +129,7 @@ class ProbabilisticMLPBlock(torch.nn.Sequential):
 
         return mu, logvar
 
-    def sequential(self) -> Self:
+    def sequential(self):
         self.probabilistic_mlp = torch.nn.Sequential(*self.probabilistic_mlp)
         self.mu = torch.nn.Sequential(*self.mu)
         self.logvar = torch.nn.Sequential(*self.logvar)

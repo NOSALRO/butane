@@ -1,5 +1,4 @@
-from typing import Optional, Callable, Union, Tuple
-from typing_extensions import Self
+from typing import Optional, Callable, Union
 import math
 import torch
 
@@ -19,6 +18,10 @@ class DDPM(torch.nn.Module):
         self._dummy_param = torch.nn.Parameter(torch.empty(0))
         if scheduler == 'linear':
             self.beta_linear_scheduler()
+        elif scheduler == 'cosine':
+            self.beta_cosine_scheduler()
+        else:
+            raise ValueError(f"Unsupported scheduler type: {scheduler}")
 
     def sample_timesteps(self, n: int) -> torch.Tensor:
         return torch.randint(0, self._timesteps.size(0), size=(n, 1), device=self._dummy_param.device, dtype=torch.int64)
@@ -73,31 +76,40 @@ class DDPM(torch.nn.Module):
     def sample(
         self,
         model: torch.nn.Module,
-        x: torch.Tensor,
+        dims: Union[list[int,...], tuple[int], torch.Tensor],
+        sample_fn: Callable,
         condition: Optional[torch.Tensor] = None,
-        *,
-        keep_record: Optional[bool] = False
+        keep_record: Optional[bool] = False,
+        n_samples_per_condition: int = 1
     ) -> torch.Tensor:
 
         model.eval()
-        x = x.to(self._dummy_param.device)
         if condition is not None:
             condition = condition.to(self._dummy_param.device)
-        t_template = torch.ones((x.size(0), 1)).to(self._dummy_param.device)
 
-        if keep_record:
-            _record = [x.unsqueeze(0)]
+        generated = []
+        for _ in range(n_samples_per_condition if condition is not None else 1):
+            _record = []
+            x = sample_fn(*dims)
+            x = x.to(self._dummy_param.device)
+            t_template = torch.ones((x.size(0), 1)).to(self._dummy_param.device)
 
-        for i in reversed(self._timesteps):
-            t = t_template * i
-            predicted_noise = model(x, t, condition)
-            x = self.reverse(x, t.long(), predicted_noise)
             if keep_record:
-                _record.append(x.unsqueeze(0))
-        model.train()
-        return x if not keep_record else torch.vstack(_record)
+                _record = [x.unsqueeze(0)]
 
-    def to(self, *args, **kwargs) -> Self:
+            # need to check
+            for i in reversed(self._timesteps[:-1]):
+                t = t_template * i
+                predicted_noise = model(x, t, condition)
+                x = self.reverse(x, t.long(), predicted_noise)
+                if keep_record:
+                    _record.append(x.unsqueeze(0))
+            generated_i = torch.vstack(_record) if keep_record else x
+            generated.append(generated_i.unsqueeze(0))
+        model.train()
+        return torch.vstack(generated).squeeze(0)
+
+    def to(self, *args, **kwargs):
         super().to(*args, **kwargs)
         self._beta = self._beta.to(self._dummy_param.device)
         self.__prepare_coefs()

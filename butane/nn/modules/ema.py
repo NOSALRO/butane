@@ -1,7 +1,5 @@
-from typing import TypeAlias, Union, Optional, List, Tuple, Self
-import copy
 import torch
-from .._typedefs import *
+
 
 class EMA(torch.nn.Module):
 
