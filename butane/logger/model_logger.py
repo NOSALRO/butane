@@ -38,6 +38,7 @@ class ModelLogger:
         _path = f"{self.fpath}/checkpoint_{id}/"
         if not os.path.exists(_path):
             os.mkdir(_path)
+            os.mkdir(_path + "/outputs")
 
         if isinstance(model, torch.nn.Module):
             torch.save(model.state_dict(), f"{_path}/model.pt")
@@ -62,3 +63,7 @@ class ModelLogger:
     @property
     def last_path(self):
         return self.__last_used_path
+
+    @property
+    def output_path(self):
+        return self.__last_used_path + "/outputs"
