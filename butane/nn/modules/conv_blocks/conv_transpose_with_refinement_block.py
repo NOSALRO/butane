@@ -10,7 +10,7 @@ from .conv_transpose_block import *
 from ._conv_utils import define_Nd_convolution
 
 
-class ConvTransposeToConvBlock(ConvBlockBase):
+class ConvTransposeWRefinementBlock(ConvBlockBase):
 
     def __init__(
         self,
@@ -147,6 +147,7 @@ class ConvTransposeToConvBlock(ConvBlockBase):
                 conv_bias = conv_bias[i],
                 conv_pad_mode = conv_pad_mode[i],
                 dropout = dropout[i],
+                output_activation = output_activation[i],
                 normalization = normalization[i],
                 normalization_type = self.norm_type[i]))
 
@@ -169,11 +170,14 @@ class ConvTransposeToConvBlock(ConvBlockBase):
         for module in self.conv_transpose_block:
             yield module
 
+    def __getitem__(self, idx: int) -> torch.nn.Module:
+        return self.conv_transpose_block[idx]
+
 @define_Nd_convolution('1d')
-class ConvTransposeToConv1dBlock(ConvTransposeToConvBlock): ...
+class ConvTransposeWRefinement1dBlock(ConvTransposeWRefinementBlock): ...
 
 @define_Nd_convolution('2d')
-class ConvTransposeToConv2dBlock(ConvTransposeToConvBlock): ...
+class ConvTransposeWRefinement2dBlock(ConvTransposeWRefinementBlock): ...
 
 @define_Nd_convolution('3d')
-class ConvTransposeToConv3dBlock(ConvTransposeToConvBlock): ...
+class ConvTransposeWRefinement3dBlock(ConvTransposeWRefinementBlock): ...
