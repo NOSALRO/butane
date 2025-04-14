@@ -76,38 +76,34 @@ class DDPM(torch.nn.Module):
     def sample(
         self,
         model: torch.nn.Module,
-        dims: Union[list[int,...], tuple[int], torch.Tensor],
-        sample_fn: Callable,
+        x0: torch.Tensor,
         condition: Optional[torch.Tensor] = None,
         keep_record: Optional[bool] = False,
-        n_samples_per_condition: int = 1
+        multiple_gen_per_condition: Optional[bool] = False,
     ) -> torch.Tensor:
 
         model.eval()
         if condition is not None:
             condition = condition.to(self._dummy_param.device)
 
-        generated = []
-        for _ in range(n_samples_per_condition if condition is not None else 1):
-            _record = []
-            x = sample_fn(*dims)
-            x = x.to(self._dummy_param.device)
-            t_template = torch.ones((x.size(0), 1)).to(self._dummy_param.device)
+        if not multiple_gen_per_condition:
+            x0 = x0.unsqueeze(0)
 
-            if keep_record:
-                _record = [x.unsqueeze(0)]
+        generated_samples = torch.empty(x0.size(0), len(self._timesteps), *x0.size()[1:])
 
-            # need to check
-            for i in reversed(self._timesteps[:-1]):
-                t = t_template * i
-                predicted_noise = model(x, t, condition)
-                x = self.reverse(x, t.long(), predicted_noise)
-                if keep_record:
-                    _record.append(x.unsqueeze(0))
-            generated_i = torch.vstack(_record) if keep_record else x
-            generated.append(generated_i.unsqueeze(0))
+        x0 = x0.to(self._dummy_param.device)
+
+        for i, x in enumerate(x0):
+            generated_samples[i] = x
+            for j, t in enumerate(reversed(self._timesteps[:-1])):
+                _t = torch.full((x.size(0), 1), t, device=self._dummy_param.device)
+                predicted_noise = model(x, _t, condition)
+                x = self.reverse(x, _t.long(), predicted_noise)
+                generated_samples[i, j+1] = x
+        if not keep_record:
+            generated_samples = generated_samples[:, -1]
         model.train()
-        return torch.vstack(generated).squeeze(0)
+        return generated_samples.squeeze(0)
 
     def to(self, *args, **kwargs):
         super().to(*args, **kwargs)
