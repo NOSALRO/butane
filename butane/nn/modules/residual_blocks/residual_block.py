@@ -35,10 +35,9 @@ class ResidualBlock(ConvBlockBase):
 
         normalization = _fill_defaults(normalization, 2)
 
-        self.pool = None
         self.input_dims = input_dims
         self.residual_block = torch.nn.ModuleList()
-        self.conv_module = self.conv(
+        conv_module = self.conv(
             input_dims = input_dims,
             channels = [channels, channels],
             activation_function = [activation_function],
@@ -52,11 +51,11 @@ class ResidualBlock(ConvBlockBase):
             normalization_type = [normalization_type],
             normalization = [normalization[0], normalization[1]]
         )
-        self.residual_block.append(self.conv_module)
+        self.residual_block.append(conv_module)
 
-        self.shortcut = torch.nn.Identity()
+        shortcut = torch.nn.Identity()
         if conv_stride != 1 or input_dims[0] != channels:
-            self.shortcut = self.conv(
+            shortcut = self.conv(
                 input_dims = input_dims,
                 channels = [channels],
                 activation_function = [torch.nn.Identity()],
@@ -67,16 +66,19 @@ class ResidualBlock(ConvBlockBase):
                 normalization = shortcut_normalization,
                 normalization_type = shortcut_normalization_type,
             )
-            self.residual_block.append(self.shortcut)
+        self.residual_block.append(shortcut)
 
+        self._has_pool = False
         if pool is not None:
-            self.pool = pool(kernel_size=pool_kernels, stride=pool_stride, padding=pool_pad)
-            self.residual_block.append(self.pool)
+            self._has_pool = True
+            self.residual_block.append(
+                pool(kernel_size=pool_kernels, stride=pool_stride, padding=pool_pad)
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.residual_block[0](x)
         out += self.residual_block[1](x)
-        if self.pool is not None:
+        if self._has_pool:
             out = self.residual_block[2](out)
         return out
 
