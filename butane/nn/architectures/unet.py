@@ -1,117 +1,155 @@
 import math
 import copy
 from typing import Optional, Callable, Tuple
-from ..modules import *
-from ..._typedefs import *
 import torch
 
-def get_double_conv(in_channels: int, out_channels: int) -> torch.nn.Module:
-    return Conv1dBlock(
-        input_dims = in_channels,
-        channels = [out_channels, out_channels],
-        activation_function = [torch.nn.ReLU()],
-        conv_kernels = [3],
-        conv_stride = [1],
-        conv_pad = [1],
-        conv_bias = [False],
-        pool_kernels = [0, 0],
-        pool_stride = [0, 2],
-        normalization = [True],
-        output_activation = True
-    )
+from ..modules import *
+from ..._typedefs import *
 
-class DownsampleBlock(torch.nn.Module):
+def define_Nd_unet(conv_type: str, transpose: Optional[bool] = False) -> Callable[object, object]:
+    def inner(cls):
+        if conv_type == '1d':
+            cls.conv = torch.nn.Conv1d
+            cls.conv_block_creator = Conv1dBlock
+            cls.up_conv_block_creator = ConvTransposeWRefinement1dBlock
+            cls.pool = torch.nn.MaxPool1d
+            cls.N = 1
+        elif conv_type == '2d':
+            cls.conv = torch.nn.Conv2d
+            cls.conv_block_creator = Conv2dBlock
+            cls.up_conv_block_creator = ConvTransposeWRefinement2dBlock
+            cls.pool = torch.nn.MaxPool2d
+            cls.N = 2
+        elif conv_type == '3d':
+            cls.conv = torch.nn.Conv3d
+            cls.conv_block_creator = Conv3dBlock
+            cls.up_conv_block_creator = ConvTransposeWRefinement3dBlock
+            cls.pool = torch.nn.MaxPool3d
+            cls.N = 3
+        return cls
+    return inner
+
+
+class UNet(torch.nn.Module):
+
     def __init__(
         self,
         input_dims: IntParams,
-        out_channels: int,
-        *,
-        init: Optional[bool] = False
-    ) -> None:
-        super().__init__()
-        self.__input_dims = input_dims
-        if not init:
-            self.downsample_block = torch.nn.Sequential(
-                    torch.nn.MaxPool1d(2),
-                    get_double_conv(self.__input_dims, out_channels)
-                )
-        else:
-            self.downsample_block = get_double_conv(self.__input_dims, out_channels)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.downsample_block(x)
-
-    @property
-    def output_size(self) -> torch.Tensor:
-        self.eval()
-        sz = None
-        with torch.no_grad():
-            sz = torch.tensor(self.forward(torch.rand(1, *self.__input_dims)).size()[1:])
-        self.train()
-        return sz
-
-class UpsampleBlock(torch.nn.Module):
-    def __init__(
-        self,
-        input_dims: IntParams,
-        out_channels: int,
-    ) -> None:
-        super().__init__()
-        self.__input_dims = input_dims
-        self.upsample = torch.nn.ConvTranspose1d(self.__input_dims[0].item(), self.__input_dims[0].item() // 2, kernel_size=2, stride=2)
-        self.conv_block = get_double_conv(self.__input_dims, out_channels)
-
-    def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
-        x1 = self.upsample(x1)
-        x = torch.cat([x2, x1], dim=1)
-        return self.conv_block(x)
-
-    @property
-    def output_size(self) -> torch.Tensor:
-        self.eval()
-        sz = None
-        with torch.no_grad():
-            sz = torch.tensor(self.forward(
-                torch.rand(1, *self.__input_dims), 
-                torch.rand(1, self.__input_dims[0]//2, *(self.__input_dims[1:] * 2))
-            ).size()[1:])
-        self.train()
-        return sz
-
-class UNet1d(torch.nn.Module):
-    def __init__(
-        self,
-        input_dims: IntParams,
-        channels: IntParams = [32], 
-        *,
-        scale_factor: Optional[int] = None,
-        n_blocks: Optional[int] = 5
+        channels: int,
+        n_blocks: int,
+        expand_factor: int,
+        n_mid_blocks: int = 1
     ):
         super().__init__()
+
         self.__input_dims = input_dims
-        self.__channels = copy.deepcopy(channels)
+        self._expand_by = 1
 
-        if scale_factor:
-            _scale_factors = [pow(scale_factor, i) for i in range(0, n_blocks, scale_factor - 1)]
-            self.__channels = [self.__channels[0] * f for f in _scale_factors]
+        self.down_blocks = torch.nn.ModuleList()
+        self.mid_blocks = torch.nn.ModuleList()
+        self.up_blocks = torch.nn.ModuleList()
 
-        self.downsample = torch.nn.ModuleList()
-        for i in range(len(self.__channels)):
-            if not i:
-                self.downsample.append(DownsampleBlock(self.__input_dims, self.__channels[i], init=True))
-            else:
-                self.downsample.append(DownsampleBlock(self.downsample[-1].output_size, self.__channels[i]))
+        for i in range(n_blocks):
+            block_input_dims = self.__input_dims if i == 0 else self.down_blocks[-1].output_size
+            self.down_blocks.append(self._down_double_conv(block_input_dims, channels * self._expand_by))
+            self._expand_by *= expand_factor
 
-        self.upsample = torch.nn.ModuleList()
-        for i in range(len(self.__channels)-1):
-            self.upsample.append(UpsampleBlock(self.downsample[-1].output_size if not i else self.upsample[-1].output_size, self.__channels[-(i+2)]))
-        self.output_conv = torch.nn.Conv1d(self.upsample[-1].output_size[0], self.__input_dims[0], kernel_size=1)
+        for i in range(n_mid_blocks):
+            block_input_dims = self.down_blocks[-1].output_size if i == 0 else self.mid_blocks[-1].output_size
+            self.mid_blocks.append(self._down_double_conv(block_input_dims, channels * self._expand_by, pooling=False))
 
-    def forward(self, x):
-        x_downsampled = []
-        for downsample_block in self.downsample:
-            x_downsampled.append(downsample_block(x_downsampled[-1]) if len(x_downsampled) else downsample_block(x))
+        for i in range(n_blocks):
+            block_input_dims = self.mid_blocks[-1].output_size if i == 0 else self.up_blocks[-1].output_size
+            self._expand_by = int(self._expand_by/expand_factor)
+            self.up_blocks.append(self._up_double_conv(block_input_dims, channels * self._expand_by))
 
-        for i, upsample_block in enumerate(self.upsample):
-            x = upsample_block(x_downsampled[-1], x_downsampled[-2]) if not i else upsample_block(x, x_downsampled[-(i+2)])
-        return self.output_conv(x)
+        self.out_proj = self.conv(self.up_blocks[-1].output_size[0], self.__input_dims[0], kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        down_blocks_outputs = []
+        for i, down_block in enumerate(self.down_blocks):
+            db = down_block.module_list()
+            for l in db[:-1]:
+                x = l(x)
+            down_blocks_outputs.append(x)
+            x = db[-1](x)
+
+        for mid_block in self.mid_blocks:
+            x = mid_block(x)
+
+        for i, up_block in enumerate(self.up_blocks):
+            x = up_block[0](x)
+            x, skip = self.__padding(x, down_blocks_outputs[-(i+1)])
+            x = torch.cat([skip, x], dim=1)
+            x = up_block[1](x)
+            print(x.size())
+
+        x = self.out_proj(x)
+        return x
+
+    def __padding(self, x1, x2):
+        x1_last_dims = x1.shape[2:]
+        x2_last_dims = x2.shape[2:]
+
+        pad = []
+        for i in range(len(x1_last_dims)):
+            diff = x2_last_dims[i] - x1_last_dims[i]
+            pad_before = diff // 2
+            pad_after = diff - pad_before
+            pad.extend([pad_before, pad_after])
+        x1 = torch.nn.functional.pad(x1, pad)
+        return x1, x2
+
+    def _down_double_conv(
+        self,
+        input_dims: IntParams,
+        channels: int,
+        *,
+        pooling: Optional[bool] = True
+    ) -> torch.nn.Module:
+
+        return self.conv_block_creator(
+            input_dims = input_dims,
+            channels = [channels, channels],
+            activation_function = [torch.nn.ReLU()],
+            conv_stride = [1, 1],
+            conv_bias = [True],
+            conv_pad = [0],
+            output_activation = True,
+            pool = self.pool,
+            pool_kernels = [0, 2] if pooling else [0, 0],
+            pool_stride = [0, 2]
+        )
+
+    def _up_double_conv(
+        self,
+        input_dims: IntParams,
+        channels: int,
+    ) -> torch.nn.Module:
+
+        return self.up_conv_block_creator(
+            input_dims = input_dims,
+            channels = [channels],
+            conv_transpose_kernels = [2],
+            conv_transpose_pad = [0],
+            conv_blocks = 2,
+            conv_input_channels = [channels * 2],
+            conv_channels = [[channels, channels]],
+            conv_kernels = [[2, 2]],
+            conv_stride = [[1, 2]],
+            conv_bias = [True],
+            conv_pad = [0],
+            activation_function = [torch.nn.ReLU()],
+            output_activation = [True],
+        )
+
+
+@define_Nd_unet('1d')
+class UNet1d(UNet): ...
+
+@define_Nd_unet('2d')
+class UNet2d(UNet): ...
+
+@define_Nd_unet('3d')
+class UNet3d(UNet): ...
