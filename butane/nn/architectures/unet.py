@@ -83,7 +83,6 @@ class UNet(torch.nn.Module):
             x, skip = self.__padding(x, down_blocks_outputs[-(i+1)])
             x = torch.cat([skip, x], dim=1)
             x = up_block[1](x)
-            print(x.size())
 
         x = self.out_proj(x)
         return x
