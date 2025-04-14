@@ -1,6 +1,8 @@
 from typing import Optional
 import torch
 
+from ..._typedefs import *
+
 
 class LearnableEmbeddings(torch.nn.Module):
 
@@ -35,7 +37,46 @@ class SinusoidalEmbeddings(torch.nn.Module):
 
     @property
     def embeddings(self) -> torch.Tensor:
-        return self._PE.to(self.__dumy_param.device)
+        return self._PE.to(self.__dummy_param.device)
+
+    @property
+    def dim(self) -> int:
+        return self._PE[0].shape[-1]
+
+class PatchEmbeddings(torch.nn.Module):
+
+    def __init__(
+        self,
+        input_dims: IntParams,
+        d_model: int,
+        patch_size: Union[int, IntParams],
+        bias: Optional[bool] = False,
+    ):
+        super().__init__()
+        self.__input_dims = input_dims
+        self._d_model = d_model
+
+        self._image_size = input_dims[1:]
+
+        if not isinstance(patch_size, (tuple, list)):
+            patch_size = [patch_size, patch_size]
+
+        self._patch_size = patch_size
+        self.n_patches = (self._image_size[0] * self._image_size[1]) / (self._patch_size[0] * self._patch_size[1])
+
+        self.proj = torch.nn.Conv2d(
+            self.__input_dims[0],
+            self._d_model,
+            kernel_size=self._patch_size,
+            stride=self._patch_size,
+            bias=bias
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        patches = self.proj(x)
+        patches = patches.flatten(2).transpose(-1,-2)
+        return patches
+
 
 class RelativePositionEmbeddings(torch.nn.Module):
 
