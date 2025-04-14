@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Dict, Self, Union
+from typing import Optional, List, Tuple, Dict, Union
 import torch
 
 from .dataset import Dataset
@@ -37,7 +37,7 @@ class TrajectoryDataset(Dataset):
         seq_current = self.data[traj_index, step_index: step_index + self.horizon]
         seq_future = self.data[traj_index, (step_index + self.horizon): step_index + 2*self.horizon]
         return {"data": seq_current if self._transforms is None else self._transforms(seq_current),
-                "target": seq_future if self._transforms is None else self._transforms(seq_future)}
+                "targets": seq_future if self._transforms is None else self._transforms(seq_future)}
 
     def split(self, percentage: float):
         (split_1_data, _), (split_2_data, _) = self._split(percentage)
@@ -72,11 +72,11 @@ class TrajectoryDataset(Dataset):
         traj_idx_list = (idx_list // self.num_steps).unsqueeze(-1)
         step_idx_list = idx_list % self.num_steps
         step_idx_list_data = batch_arange(step_idx_list, step_idx_list + self.horizon)
-        step_idx_list_target = batch_arange(step_idx_list + self.horizon, step_idx_list + 2*self.horizon)
+        step_idx_list_targets = batch_arange(step_idx_list + self.horizon, step_idx_list + 2*self.horizon)
 
         return {
             "data": self.data[traj_idx_list, step_idx_list_data] if self._transforms is None
                 else self._vectorized_transforms(self.data[traj_idx_list, step_idx_list_data]),
-            "target": self.data[traj_idx_list, step_idx_list_target] if self._transforms is None
-                    else self._vectorized_transforms(self.data[traj_idx_list, step_idx_list_target])
+            "targets": self.data[traj_idx_list, step_idx_list_targets] if self._transforms is None
+                    else self._vectorized_transforms(self.data[traj_idx_list, step_idx_list_targets])
         }

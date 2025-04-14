@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Dict, Self, Union
+from typing import Optional, List, Tuple, Dict, Union
 import torch
 
 from ..transforms import Transforms
