@@ -2,42 +2,74 @@ from typing import Callable, Optional
 import functools
 import torch
 
-def _euler_explicit(x: torch.Tensor, dx: torch.Tensor, dt: torch.Tensor) -> torch.Tensor:
-    return x + (dx * dt)
+
+def _euler_explicit(
+    func: Callable,
+    x0: torch.Tensor,
+    steps: torch.Tensor,
+    return_func_outputs: bool = False,
+) -> torch.Tensor:
+    solutions = torch.empty((len(steps), *x0.shape), device=x0.device, dtype=x0.dtype)
+    solutions[0] = x0
+
+    dx = None
+    if return_func_outputs:
+        dx = torch.zeros((len(steps), *x0.shape), device=x0.device, dtype=x0.dtype)
+
+    _x = x0
+    for i, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
+        _dh = h1 - h0
+        _dx = func(h0, _x)
+        _dxdh = _dx * _dh
+        _x = _x + _dxdh
+        solutions[i] = _x
+        if return_func_outputs:
+            dx[i] = _dx
+    return solutions, dx
+
 
 def _rk4(
-    func: torch.Tensor,
-    x: torch.Tensor,
-    t: torch.Tensor,
-    dt: torch.Tensor,
-    *func_args: Optional[tuple]
+    func: Callable,
+    x0: torch.Tensor,
+    steps: torch.Tensor,
+    return_func_outputs: bool = False,
 ) -> torch.Tensor:
+    solutions = torch.empty((len(steps), *x0.shape), device=x0.device, dtype=x0.dtype)
+    solutions[0] = x0
 
-    k1 = func(x, t, *func_args)
-    k2 = func(x + (k1 / 2.)*dt, t + dt/2., *func_args)
-    k3 = func(x + (k2 / 2.)*dt, t + dt/2., *func_args)
-    k4 = func(x + k3 * dt, t + dt, *func_args)
-    sol = (k1 + 2*k2 + 2*k3 + k4)
-    return (dt/6) * sol
+    dx = None
+    if return_func_outputs:
+        dx = torch.zeros((len(steps), *x0.shape), device=x0.device, dtype=x0.dtype)
+
+    _x = x0
+    for i, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
+        _dh = h1 - h0
+
+        k1 = func(h0, _x)
+        k2 = func(h0 + _dh / 2.0, _x + (k1 / 2.0) * _dh)
+        k3 = func(h0 + _dh / 2.0, _x + (k2 / 2.0) * _dh)
+        k4 = func(h0 + _dh, _x + k3 * _dh)
+        _dx = k1 + 2 * k2 + 2 * k3 + k4
+        _dxdh = _dx * (_dh / 6)
+        _x = _x + _dxdh
+
+        solutions[i] = _x
+        if return_func_outputs:
+            dx[i] = _dx
+    return solutions, dx
 
 
 def odeint(
     func: Callable,
-    x: torch.Tensor,
-    t: torch.Tensor,
-    *func_args: Optional[tuple],
-    method: Optional[str] = 'euler_forward'
+    x0: torch.Tensor,
+    steps: torch.Tensor,
+    method: Optional[str] = 'euler',
+    return_func_outputs: Optional[bool] = False,
 ) -> torch.Tensor:
 
-    time_points = t
-    _solutions = torch.full((t.size(0), *x.size()), torch.finfo(torch.float32).max, device=x.device)
-    _solutions[0] = x
-
-    for i, (t0, t1) in enumerate(zip(time_points[:-1], time_points[1:])):
-        dt = t1 - t0
-        if method == 'euler_forward':
-            dx = func(_solutions[i], t[i+1], *func_args)
-            _solutions[i+1] = _euler_explicit(_solutions[i], dx, dt)
-        elif method == 'rk4':
-            _solutions[i+1] = _rk4(func, _solutions[i], t[i+1], dt, *func_args)
-    return _solutions
+    if method == "euler":
+        return _euler_explicit(func, x0, steps, return_func_outputs)
+    elif method == "rk4":
+        return _rk4(func, x0, steps, return_func_outputs)
+    else:
+        raise ValueError("Method does not exist")

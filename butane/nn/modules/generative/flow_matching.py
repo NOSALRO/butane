@@ -1,7 +1,9 @@
 from typing import Optional, Callable, Union, Tuple
+import time
 import functools
 import torch
-from torchdiffeq import odeint
+from butane.math import *
+# from torchdiffeq import odeint
 
 
 class FlowMatching(torch.nn.Module):
@@ -33,8 +35,10 @@ class FlowMatching(torch.nn.Module):
         multiple_gen_per_condition: Optional[bool] = False,
         method: Optional[str] = 'euler',
         reverse: Optional[bool] = False,
+        return_model_outputs: Optional[bool] = False,
     ) -> torch.Tensor:
 
+        model.to(self._dummy_param.device)
         if condition is not None:
             condition = condition.to(self._dummy_param.device)
 
@@ -43,8 +47,10 @@ class FlowMatching(torch.nn.Module):
 
         if keep_record:
             generated_samples = torch.empty(x0.size(0), n_timesteps, *x0.size()[1:])
+            model_outputs = torch.empty(x0.size(0), n_timesteps, *x0.size()[1:])
         else:
             generated_samples = torch.empty_like(x0)
+            model_outputs = torch.empty_like(x0)
 
         if not reverse:
             timesteps = torch.linspace(0., 1., n_timesteps).to(self._dummy_param.device)
@@ -55,10 +61,16 @@ class FlowMatching(torch.nn.Module):
         func = lambda t, x, c: model(x, t.repeat(x.size(0)).reshape(-1, 1), c)
 
         for i, _x0 in enumerate(x0):
-            sols = odeint(functools.partial(func, c=condition), _x0, timesteps, method=method)
+            sols, v = odeint(functools.partial(func, c=condition), _x0, timesteps, method, return_model_outputs)
             sols = sols[None,...] if keep_record else sols[-1][None,...]
             generated_samples[i] = sols
-        return generated_samples.squeeze(0)
+            if return_model_outputs:
+                v = v[None,...] if keep_record else v[-1][None,...]
+                model_outputs[i] = v
+        if return_model_outputs:
+            return generated_samples.squeeze(0), model_outputs.squeeze(0)
+        else:
+            return generated_samples.squeeze(0)
 
     @torch.no_grad()
     def flow_likelihood(
@@ -144,4 +156,22 @@ class TargetConditionalFlowMatching(FlowMatching):
         epsilon = torch.randn_like(x0)
         x_t = mu_t + sigma_t * epsilon
         u_t = (x1 - (1 - self._sigma) * x_t) / (1 - (1 - self._sigma) * t)
+        return x_t, u_t
+
+class MiddleVarianceFlowMatching(FlowMatching):
+
+    def forward(
+        self,
+        x0: torch.Tensor,
+        x1: torch.Tensor,
+        t: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        while len(x0.size()) != len(t.size()):
+            t = t[..., None]
+        mu_t = t * x1 + (1 - t) * x0
+        sigma_t = self._sigma * (-4*(t - 0.5)**2 + 1)
+        epsilon = torch.randn_like(x0)
+        x_t = mu_t + sigma_t * epsilon
+        u_t = x1 - x0
         return x_t, u_t
