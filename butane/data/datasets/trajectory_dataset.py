@@ -9,21 +9,26 @@ class TrajectoryDataset(Dataset):
 
     def __init__(
         self,
-        data: Optional[torch.Tensor] = None,
-        horizon: int = 16,
+        data: Optional[torch.Tensor],
+        horizon: int,
+        *,
+        shift: int = 1,
         loop: bool = False
     ) -> None:
         super().__init__()
 
+        assert (shift > 0), "shift cannot be 0"
+
         self.data = torch.tensor([]) if data is None else data.detach().clone().float()
         self.horizon = horizon
+        self.shift = shift
         self._loop = loop
         _, self.num_steps, _ = self.data.shape
         self._device = torch.device('cpu')
         self._is_data_prepared = False
 
     def __len__(self) -> int:
-        return self.data.size(0) * self.num_steps
+        return (self.data.size(0) * self.num_steps) // self.shift
 
     def __getitem__(self, idx: int) -> torch.Tensor:
         if not self._is_data_prepared:
@@ -32,6 +37,7 @@ class TrajectoryDataset(Dataset):
         if not isinstance(idx, int):
             return self.__batched_get(idx)
 
+        idx *= self.shift
         traj_index = idx // self.num_steps
         step_index = idx % self.num_steps
         seq_current = self.data[traj_index, step_index: step_index + self.horizon]
@@ -41,8 +47,8 @@ class TrajectoryDataset(Dataset):
 
     def split(self, percentage: float):
         (split_1_data, _), (split_2_data, _) = self._split(percentage)
-        self.__init__(split_1_data, horizon=self.horizon, loop=self._loop)
-        return TrajectoryDataset(split_2_data, horizon=self.horizon, loop=self._loop)
+        self.__init__(split_1_data, horizon=self.horizon, shift=self.shift, loop=self._loop)
+        return TrajectoryDataset(split_2_data, horizon=self.horizon, shift=self.shift, loop=self._loop)
 
     def __prepare_data(self):
         if not self._loop:
@@ -65,9 +71,10 @@ class TrajectoryDataset(Dataset):
 
             step = idxs.step
             step = 1 if step is None else step
+            start, stop, step = start * self.shift, stop * self.shift, step * self.shift
             idx_list = torch.arange(start, stop, step)
         else:
-            idx_list = torch.tensor(idxs)
+            idx_list = torch.tensor(idxs) * self.shift
 
         traj_idx_list = (idx_list // self.num_steps).unsqueeze(-1)
         step_idx_list = idx_list % self.num_steps
