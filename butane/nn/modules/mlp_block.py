@@ -27,9 +27,13 @@ class MLPBlock(torch.nn.Sequential):
         super().__init__()
         self.mlp = torch.nn.ModuleList()
 
-        _hidden_dims = copy.deepcopy(hidden_dims)
+        if hidden_dims is None:
+            _hidden_dims = []
+        else:
+            _hidden_dims = copy.deepcopy(hidden_dims)
+
         _hidden_dims.insert(0, input_dims)
-        _hidden_dims.insert(len(hidden_dims) + 1, output_dims)
+        _hidden_dims.insert(len(_hidden_dims), output_dims)
         n_layers = len(_hidden_dims) - 1
         activation_function = _fill_defaults(activation_function, n_layers)
         bias = _fill_defaults(bias, n_layers)
