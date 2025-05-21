@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 import torch
 
 from ...._typedefs import *
@@ -15,20 +15,20 @@ class ResidualBlock(ConvBlockBase):
         channels: int = 32,
         *,
         activation_function: torch.nn.Module = torch.nn.ReLU(),
-        conv_kernels: Optional[int] = 3,
-        conv_stride: Optional[int] = 1,
-        conv_pad: Optional[int] = 1,
-        conv_bias: Optional[bool] = True,
-        conv_pad_mode: Optional[str] = 'zeros',
+        conv_kernels: int = 3,
+        conv_stride: int = 1,
+        conv_pad: int = 1,
+        conv_bias: bool = True,
+        conv_pad_mode: str = 'zeros',
         pool: Optional[torch.nn.Module] = None,
         pool_kernels: int = 0,
         pool_stride: int = 1,
         pool_pad: int = 0,
         dropout: float = 0.,
-        output_activation: Optional[bool] = False,
+        output_activation: bool = False,
         normalization: BoolParams = [False],
         normalization_type: Optional[torch.nn.Module] = None,
-        shortcut_normalization: Optional[bool] = False,
+        shortcut_normalization: bool = False,
         shortcut_normalization_type: Optional[torch.nn.Module] = None
     ):
         super().__init__()
@@ -81,6 +81,12 @@ class ResidualBlock(ConvBlockBase):
         if self._has_pool:
             out = self.residual_block[2](out)
         return out
+
+    def separate_shortcut(self) -> Tuple[torch.nn.Module, torch.nn.Module]:
+        _primary = torch.nn.Sequential()
+        for m in self.residual_block[:-1]:
+            _primary.extend(m)
+        return _primary, self.residual_block[-1]
 
 @define_Nd_residual('1d')
 class Residual1dBlock(ResidualBlock): ...
