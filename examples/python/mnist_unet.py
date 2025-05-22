@@ -13,8 +13,7 @@ if __name__ == "__main__":
 
     model = butane.nn.UNet2d(
         [1, 28, 28],
-        32,
-        channel_mults=(1, 2, 4),
+        channels=[32, 64, 128],
         self_condition=True,
         attention=True,
         use_film=True,
