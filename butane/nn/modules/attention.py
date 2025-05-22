@@ -1,9 +1,8 @@
-import math
-import copy
 from typing import TypeAlias, Union, Optional, Callable
-from ..._helpers import _fill_defaults, _prod, module_name
 import torch
 
+from ..._helpers import _fill_defaults, _prod, module_name
+from ..utils import utils
 from ..._typedefs import *
 
 class SelfAttention(torch.nn.Module):
@@ -82,6 +81,7 @@ class LocalSelfAttention(torch.nn.Module):
         dropout_p: Optional[float] = 0.0,
         bias: Optional[bool] = False,
         prenorm: ModuleParams = None,
+        zero_conv: bool = False,
     ):
         super().__init__()
         assert d_model % n_heads == 0, "Features cannot be devided equally to N heads"
@@ -97,7 +97,11 @@ class LocalSelfAttention(torch.nn.Module):
         self.query = self.conv(self._d_model, self._d_model, kernel_size, padding=_padding, bias=bias)
         self.key = self.conv(self._d_model, self._d_model, kernel_size, padding=_padding, bias=bias)
         self.value = self.conv(self._d_model, self._d_model, kernel_size, padding=_padding, bias=bias)
-        self.projection = self.conv(self._d_model, self._d_model, 1, bias=bias)
+        self.projection = (
+            utils.zero_module(self.conv(self._d_model, self._d_model, 1, bias=bias))
+            if zero_conv
+            else self.conv(self._d_model, self._d_model, 1, bias=bias)
+        )
         # fmt: on
 
         if dropout_p > 0:
