@@ -8,7 +8,7 @@ from butane.math import *
 
 class FlowMatching(torch.nn.Module):
 
-    def __init__(self, sigma: Optional[float] = 0.1):
+    def __init__(self, sigma: float = 0.1):
         super().__init__()
         # trick to get module's device
         self._dummy_param = torch.nn.Parameter(torch.empty(0))
@@ -31,11 +31,11 @@ class FlowMatching(torch.nn.Module):
         x0: torch.Tensor,
         n_timesteps: int,
         condition: Optional[torch.Tensor] = None,
-        keep_record: Optional[bool] = False,
-        multiple_gen_per_condition: Optional[bool] = False,
-        method: Optional[str] = 'euler',
-        reverse: Optional[bool] = False,
-        return_model_outputs: Optional[bool] = False,
+        keep_record: bool = False,
+        multiple_gen_per_condition: bool = False,
+        method: str = 'euler',
+        reverse: bool = False,
+        return_model_outputs: bool = False,
     ) -> torch.Tensor:
 
         model.to(self._dummy_param.device)
@@ -80,9 +80,9 @@ class FlowMatching(torch.nn.Module):
         source_dist,
         n_timesteps: int,
         condition: Optional[torch.Tensor] = None,
-        keep_record: Optional[bool] = False,
-        multiple_gen_per_condition: Optional[bool] = False,
-        method: Optional[str] = 'midpoint',
+        keep_record: bool = False,
+        multiple_gen_per_condition: bool = False,
+        method: str = 'euler',
     ) -> torch.Tensor:
 
         def func(t, x, c):

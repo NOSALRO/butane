@@ -4,8 +4,13 @@ import torch
 from ..._typedefs import *
 from ..._helpers import module_name
 
-def calculate_output_size(*modules, input_dims: IntParams) -> torch.Tensor:
+def zero_module(module) -> torch.nn.Module:
 
+    for p in module.parameters():
+        p.detach().zero_()
+    return module
+
+def calculate_output_size(*modules, input_dims: IntParams) -> torch.Tensor:
     _input = torch.randn(1, *input_dims)
     out_sz = None
     for module in modules:
@@ -17,7 +22,6 @@ def calculate_output_size(*modules, input_dims: IntParams) -> torch.Tensor:
 
 @torch.no_grad
 def init_weights(model: torch.nn.Module, weight_init_method: Callable, bias_init_method: Optional[Callable] = None):
-    print(model)
     for module in model.modules():
         if hasattr(module, 'weight'):
             if 'norm' in module._get_name().lower():
