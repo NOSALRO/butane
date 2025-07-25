@@ -6,7 +6,7 @@ from ..modules.residual_blocks import *
 from ..modules.conv_blocks import Conv1dBlock, Conv2dBlock, Conv3dBlock
 from ..modules.mlp_block import MLPBlock
 from ..modules.attention import LocalSelfAttention1d, LocalSelfAttention2d
-from ..modules.embeddings import SinusoidalEmbeddings
+from ..modules.embeddings import SinusoidalEmbeddings, LearnableEmbeddings
 from ..utils import utils
 
 class ResBlockNd(torch.nn.Module):
@@ -14,16 +14,17 @@ class ResBlockNd(torch.nn.Module):
     conv_block: torch.nn.Module
     conv: torch.nn.Module
 
-    def __init__(self, input_dims: IntParams, channels: int, embedding_size: int):
+    def __init__(self, input_dims: IntParams, channels: int, embedding_size: Optional[int] = None):
         super().__init__()
         self.__input_dims = input_dims
 
-        self.time_projection = MLPBlock(
-            input_dims=embedding_size,
-            output_dims=channels,
-            hidden_dims=[embedding_size * 2],
-            activation_function=[torch.nn.SiLU()],
-        )
+        if embedding_size is not None:
+            self.time_projection = MLPBlock(
+                input_dims=embedding_size,
+                output_dims=channels,
+                hidden_dims=[embedding_size * 2],
+                activation_function=[torch.nn.SiLU()],
+            )
 
         self.pre_embedding = torch.nn.Sequential(
             torch.nn.GroupNorm(32, self.__input_dims[0]),
@@ -57,12 +58,11 @@ class ResBlockNd(torch.nn.Module):
         return h + self.shortcut(x)
 
     @property
+    @torch.no_grad()
     def output_size(self) -> torch.Tensor:
-        self.eval()
         _input = torch.randn(1, *self.__input_dims)
         _out = self(_input)
         _sz = torch.tensor(_out.size())[1:]
-        self.train()
         return _sz
 
 class ResBlock1d(ResBlockNd):
@@ -112,12 +112,11 @@ class DownsampleNd(torch.nn.Module):
         return self.down(x), x
 
     @property
+    @torch.no_grad()
     def output_size(self) -> torch.Tensor:
-        self.eval()
         _input = torch.randn(1, *self.__input_dims)
         _out = self(_input)[0]
         _sz = torch.tensor(_out.size())[1:]
-        self.train()
         return _sz
 
 class Downsample1d(DownsampleNd):
@@ -183,13 +182,12 @@ class UpsampleNd(torch.nn.Module):
         return x
 
     @property
+    @torch.no_grad()
     def output_size(self) -> torch.Tensor:
-        self.eval()
         _input = torch.randn(1, *self.__input_dims)
         _skip = torch.randn(1, self.__channels, *self.__input_dims[1:])
         _out = self(_input, _skip)
         _sz = torch.tensor(_out.size())[1:]
-        self.train()
         return _sz
 
 class Upsample1d(UpsampleNd):
@@ -225,6 +223,8 @@ class UNetNd(torch.nn.Module):
         use_film: bool = True,
         n_classes: Optional[int] = None,
         n_middle_blocks: int = 2,
+        condition_input_dims: IntParams = None,
+        output_channels: Optional[int] = None,
     ):
         assert (not self_condition and n_classes is not None) or (self_condition and n_classes is None) or (not self_condition and n_classes is None), "You can use either self-condition or class-codition"
         super().__init__()
@@ -232,6 +232,8 @@ class UNetNd(torch.nn.Module):
         self._channels = channels
         self._use_film = use_film
         self._self_condition = self_condition
+        self._condition_input_dims = condition_input_dims if condition_input_dims is not None else self.__input_dims
+        self._output_channels = output_channels if output_channels is not None else self.__input_dims[0]
 
         self.attention = partial(
             self.attention,
@@ -250,6 +252,7 @@ class UNetNd(torch.nn.Module):
         )
 
         self.time_embeddings = SinusoidalEmbeddings(time_embedding_size)
+        # self.time_embeddings = LearnableEmbeddings(time_embedding_size)
         self.time_projection = MLPBlock(
             input_dims=time_embedding_size,
             output_dims=time_embedding_size,
@@ -259,7 +262,7 @@ class UNetNd(torch.nn.Module):
 
         if self_condition:
             _condition_conv = self.conv_block(
-                input_dims=self.__input_dims,
+                input_dims=self._condition_input_dims,
                 channels=[self._channels[0] * 2 if (use_film and self.N > 1) else self._channels[0]],
                 activation_function=[torch.nn.SiLU()],
                 output_activation=True,
@@ -268,8 +271,14 @@ class UNetNd(torch.nn.Module):
                 normalization_type=partial(torch.nn.GroupNorm, num_groups=32)
             )
             _condition_conv_out = _condition_conv.output_size
+            # _condition_residual = self.residual_block_creator(
+            #     input_dims=_condition_conv_out,
+            #     channels=self._channels[0] * 2 if (use_film and self.N > 1) else self._channels[0],
+            # )
             self.condition_projection = torch.nn.Sequential(
+                # utils.zero_module(_condition_conv),
                 _condition_conv,
+                # _condition_residual
             )
             if self.N == 1:
                 self.condition_projection.extend([
@@ -333,7 +342,7 @@ class UNetNd(torch.nn.Module):
         self.out_conv = torch.nn.Sequential(
             torch.nn.GroupNorm(32, input_sz[0]),
             torch.nn.SiLU(),
-            utils.zero_module(self.conv(input_sz[0], self.__input_dims[0], 3, padding=1))
+            utils.zero_module(self.conv(input_sz[0], self._output_channels, 3, padding=1))
         )
 
     def forward(

@@ -7,7 +7,7 @@ from ..._typedefs import *
 from ..._helpers import _fill_defaults
 
 
-class MLPBlock(torch.nn.Sequential):
+class MLPBlock(torch.nn.Module):
 
     def __init__(
         self,
@@ -68,7 +68,7 @@ class MLPBlock(torch.nn.Sequential):
         self.mlp = torch.nn.Sequential(*self.mlp)
         return self
 
-class ProbabilisticMLPBlock(torch.nn.Sequential):
+class ProbabilisticMLPBlock(torch.nn.Module):
 
     def __init__(
         self,

@@ -19,15 +19,15 @@ class EMA(torch.nn.Module):
                 buffer = getattr(self, buffer_name)
                 buffer.copy_(self.decay * buffer + (1 - self.decay) * param.data)
 
-    def apply_ema(self):
+    def apply(self):
         # Store the current parameters and apply EMA
-        self.saved_params = {name: param.data.clone() for name, param in self.model.named_parameters()}
+        self.saved_params = {name.replace('.', '_'): param.data.clone() for name, param in self.model.named_parameters()}
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 buffer_name = name.replace('.', '_')
                 param.data.copy_(getattr(self, buffer_name))
 
-    def reset_to_original(self):
+    def undo(self):
         # Reset the model parameters to the original values
         for name, param in self.model.named_parameters():
             if param.requires_grad:

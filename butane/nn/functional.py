@@ -24,3 +24,12 @@ def pinball_loss(input, target, alpha, reduction="mean") -> torch.Tensor:
     elif reduction == "sum":
         loss = loss.sum()
     return loss
+
+def odin(x: torch.Tensor, epsilon: float, normalize: bool = False) -> torch.Tensor:
+    grad = x.grad
+    if normalize:
+        grad = grad / (grad.norm() + 1e-8)
+        petrubated_x = (x - epsilon * grad).detach()
+    else:
+        petrubated_x = (x - epsilon * grad.sign()).detach()
+    return petrubated_x

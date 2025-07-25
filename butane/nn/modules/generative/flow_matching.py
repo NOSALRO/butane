@@ -3,7 +3,6 @@ import time
 import functools
 import torch
 from butane.math import *
-# from torchdiffeq import odeint
 
 
 class FlowMatching(torch.nn.Module):
@@ -13,6 +12,13 @@ class FlowMatching(torch.nn.Module):
         # trick to get module's device
         self._dummy_param = torch.nn.Parameter(torch.empty(0))
         self._sigma = sigma
+        self.__source_distribution = None
+
+    def set_source_distribution(self, dist: object):
+        self.__source_distribution = dist
+
+    def source_distribution(self) -> object:
+        return self.__source_distribution
 
     def sample_timesteps(self, n):
         return torch.rand(n, 1).to(self._dummy_param.device)
@@ -85,14 +91,24 @@ class FlowMatching(torch.nn.Module):
         method: str = 'euler',
     ) -> torch.Tensor:
 
+        z = (torch.randn_like(x1).to(x1.device) < 0) * 2.0 - 1.0
         def func(t, x, c):
             x = x[0]
             with torch.set_grad_enabled(True):
                 x.requires_grad_()
                 ut = model(x, t.repeat(x.size(0)).unsqueeze(-1), c)
-                div = 0
-                for i in range(ut.flatten(1).shape[1]):
-                    div += torch.autograd.grad(outputs=ut[:,i], inputs=x, grad_outputs=torch.ones_like(ut[:,i]).detach(), create_graph=True)[0][:, i]
+                # div = 0
+                # for i in range(ut.flatten(1).shape[1]):
+                #     div += torch.autograd.grad(outputs=ut[:,i], inputs=x, grad_outputs=torch.ones_like(ut[:,i]).detach(), create_graph=True)[0][:, i]
+                ut_dot_z = torch.einsum(
+                    "ij,ij->i", ut.flatten(start_dim=1), z.flatten(start_dim=1)
+                )
+                grad_ut_dot_z = torch.autograd.grad(outputs=ut_dot_z, inputs=x, grad_outputs=torch.ones_like(ut_dot_z).detach(), create_graph=True)[0]
+                div = torch.einsum(
+                    "ij,ij->i",
+                    grad_ut_dot_z.flatten(start_dim=1),
+                    z.flatten(start_dim=1),
+                )
                 return ut.detach(), div.detach()
 
         if condition is not None:
@@ -111,7 +127,7 @@ class FlowMatching(torch.nn.Module):
         x1 = x1.to(self._dummy_param.device)
 
         for i, _x1 in enumerate(x1):
-            sols, log_det = odeint(functools.partial(func, c=condition), (_x1, torch.zeros(_x1.size(0), device=_x1.device)), timesteps, method=method)
+            sols, log_det, _ = odeint(functools.partial(func, c=condition), (_x1, torch.zeros(_x1.size(0), device=_x1.device)), timesteps, method="euler_likelihood")
             x0 = sols[-1].cpu()
             log_p0 = source_dist.log_prob(x0).to(self._dummy_param.device)
             log_det = log_p0 + log_det[-1]
