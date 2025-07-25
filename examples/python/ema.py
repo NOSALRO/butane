@@ -84,7 +84,7 @@ if __name__ == "__main__":
         avg_loss_vq = sum_loss_vq / n_batches
         print(f"Loss: {avg_loss} Reconstruction Loss: {avg_loss_ae} Reconstruction Quant Loss: {avg_loss_vq} Quantization Loss: {avg_quantization_loss}")
 
-    ema.apply_ema()
+    ema.apply()
     model.eval()
 
     fig, ax = plt.subplots()
