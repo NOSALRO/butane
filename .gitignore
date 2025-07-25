@@ -11,3 +11,4 @@ viz.py
 *.tmp
 *__pycache__
 extra/
+.envrc
