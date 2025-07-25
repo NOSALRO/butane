@@ -36,9 +36,13 @@ class Dataset(torch.utils.data.Dataset):
                 return { "data": self.data[idx] if self._transforms is None else self._vectorized_transforms(self.data[idx]) }
 
     def split(self, percentage: float):
+        _transforms = self._transforms
         (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage)
         self.__init__(split_1_data, split_1_targets)
-        return Dataset(split_2_data, split_2_targets)
+        self.set_transforms(_transforms)
+        splitted_ds = Dataset(split_2_data, split_2_targets)
+        splitted_ds.set_transforms(_transforms)
+        return splitted_ds
 
     def flatten(self, dim: int = 1) -> None:
         self.data = self.data.flatten(start_dim=dim)
@@ -57,7 +61,7 @@ class Dataset(torch.utils.data.Dataset):
 
     def set(self, data: torch.Tensor, targets: torch.Tensor = None) -> None:
         self.data = data.detach().clone()
-        if targets:
+        if targets is not None:
             self.targets = targets.detach().clone()
             self._has_targets = True
 
@@ -90,6 +94,9 @@ class Dataset(torch.utils.data.Dataset):
         self._transforms = transforms
         self._vectorized_transforms = torch.vmap(transforms)
 
+    def transforms(self) -> Transforms:
+        return self._transforms
+
     def sizes(self) -> List[int]:
         return list(self.data.size())
 
@@ -118,3 +125,11 @@ class Dataset(torch.utils.data.Dataset):
             split_1_targets = self.targets[indices[:num_el_after_split]]
             split_2_targets = self.targets[indices[num_el_after_split:]]
         return (split_1_data, split_1_targets), (split_2_data, split_2_targets)
+
+class CompatibleDataset(Dataset):
+
+    def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
+        data, target = None, None
+        batch = super().__getitem__(idx)
+        data, target = batch['data'], batch['targets']
+        return data, target

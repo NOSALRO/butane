@@ -39,3 +39,28 @@ def bagging(dataset: butane.data.Dataset, n_learners: int) -> list[butane.data.D
         _cp_ds.remove(chunk)
         _bagged_datasets.append(_cp_ds)
     return _bagged_datasets
+
+# TODO: Better implementation
+def trim(dataset: butane.data.Dataset, threshold) -> butane.data.Dataset:
+    data = dataset.data
+    if data.dim() == 2:
+        data = data[..., None]
+    res_dims = torch.arange(data.dim())[2:]
+    diffs = torch.abs(data[:, 1:, :] - data[:, :-1, :])
+
+    change_measure = diffs.mean(dim=(0, *res_dims))
+    active_mask = change_measure > threshold
+    if not active_mask.any():
+        return dataset
+
+    nonzero_indices = torch.nonzero(active_mask).squeeze()
+
+    first_diff_index = nonzero_indices[0].item()
+    last_diff_index  = nonzero_indices[-1].item()
+
+    start_index = first_diff_index
+    end_index = last_diff_index + 1  # plus one to get the corresponding later time step
+    dataset.data = data[:, start_index:end_index + 1, ...]
+
+    return dataset
+

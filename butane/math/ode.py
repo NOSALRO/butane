@@ -27,6 +27,31 @@ def _euler_explicit(
             dx[i] = _dx
     return solutions, dx
 
+def _euler_explicit_liklihood(
+    func: Callable,
+    x0: torch.Tensor,
+    steps: torch.Tensor,
+) -> torch.Tensor:
+    solutions = torch.empty((len(steps), *x0[0].shape), device=x0[0].device, dtype=x0[0].dtype)
+    likelihoods = torch.empty((len(steps), *x0[1].shape), device=x0[1].device, dtype=x0[1].dtype)
+    solutions[0] = x0[0]
+    likelihoods[0] = x0[1]
+
+    dx = None
+    _x = x0[0]
+    _l = x0[1]
+    for i, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
+        _dh = h1 - h0
+        _dx, _dl = func(h0, (_x, _l))
+        _dxdh = _dx * _dh
+        _dldh = _dl * _dh
+        _x = _x + _dxdh
+        _l = _l + _dldh
+        solutions[i] = _x
+        likelihoods[i] = _l
+    return solutions, likelihoods, dx
+
+
 
 def _rk4(
     func: Callable,
@@ -69,6 +94,8 @@ def odeint(
 
     if method == "euler":
         return _euler_explicit(func, x0, steps, return_func_outputs)
+    if method == "euler_likelihood":
+        return _euler_explicit_liklihood(func, x0, steps)
     elif method == "rk4":
         return _rk4(func, x0, steps, return_func_outputs)
     else:
