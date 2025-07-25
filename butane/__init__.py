@@ -3,7 +3,8 @@ from butane import (
     data as data,
     clustering as clustering,
     math as math,
-    logger as logger
+    logger as logger,
+    optim as optim
 )
 
 from butane.nn import (
@@ -14,3 +15,5 @@ from butane.nn import (
 from butane.data import (
     ops as ops,
 )
+
+from butane.math.ops import *
