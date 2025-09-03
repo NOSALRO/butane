@@ -2,9 +2,9 @@ import unittest
 import torch
 import butane
 
-class TestODIN(unittest.TestCase):
+class TestFGSM(unittest.TestCase):
 
-    def test_odin(self):
+    def test_fgsm(self):
         model = butane.nn.MLPBlock(
             input_dims=10,
             output_dims=3,
@@ -15,7 +15,7 @@ class TestODIN(unittest.TestCase):
         pred = model(x)
         loss = (pred - torch.randn(3)).pow(2).mean()
         loss.backward()
-        ood_sample = butane.nn.functional.odin(x, epsilon=20, normalize=False)
+        ood_sample = butane.nn.functional.fgsm(x, epsilon=20, normalize=False)
         self.assertIsNotNone(x)
 
 if __name__ == '__main__':

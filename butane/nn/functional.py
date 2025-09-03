@@ -25,7 +25,16 @@ def pinball_loss(input, target, alpha, reduction="mean") -> torch.Tensor:
         loss = loss.sum()
     return loss
 
-def odin(x: torch.Tensor, epsilon: float, normalize: bool = False) -> torch.Tensor:
+def kl_div_gaussians(mu1, logvar1, mu2, logvar2) -> torch.Tensor:
+    k = -1.0
+    log_det_ratio = logvar2 - logvar1
+    trace_term = (logvar1 - logvar2).exp()
+    mahalanobis_distance = (mu1 - mu2).pow(2) * torch.exp(-logvar2)
+    kl_div = 0.5 * (log_det_ratio + k + mahalanobis_distance + trace_term)
+    return kl_div
+
+def fgsm(x: torch.Tensor, epsilon: float, normalize: bool = False) -> torch.Tensor:
+    # Fast Gradient Sign Method
     grad = x.grad
     if normalize:
         grad = grad / (grad.norm() + 1e-8)
