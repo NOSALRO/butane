@@ -3,22 +3,41 @@ import torch
 import numpy as np
 import butane
 import matplotlib.pyplot as plt
-from extra.adapted_unet_v2 import *
 
-from torchcfm.models.unet import UNetModel
+@torch.no_grad()
+def eval_model(model, flow_matching, fpath=None):
+    x0 = flow_matching.source_distribution().sample((10,))
+    generations = flow_matching.flow(
+        model=model,
+        x0=x0,
+        n_timesteps=100,
+        condition=torch.randn_like(x0),
+        multiple_gen_per_condition=False,
+        keep_record=True,
+    )
+    generations = generations.moveaxis(1, -1).cpu()
+    for i in range(generations.size(0)):
+        fig, ax = plt.subplots()
+        ax.imshow(generations[i])
+        if fpath is None:
+            plt.show()
+        else:
+            plt.savefig(f"{fpath}/img_{i}.png")
+            plt.close()
+
 
 if __name__ == "__main__":
 
     dev = torch.device("cuda")
 
     ds = butane.data.Dataset(
-        torch.jit.load("data/mnist_data.pt").state_dict()["0"],
+        (torch.jit.load("data/mnist_data.pt").state_dict()["0"] * 2) - 1,
         torch.jit.load("data/mnist_targets.pt").state_dict()["0"],
     )
 
     ds.to(dev)
     test_ds = ds.split(0.9)
-    butane.data.ops.drop_to_max_size(ds, 8000)
+    butane.data.ops.drop_to_max_size(ds, 5000)
     dl = torch.utils.data.DataLoader(ds, batch_size=64, shuffle=True)
 
     class_conditioned = False
@@ -26,51 +45,54 @@ if __name__ == "__main__":
     model = butane.nn.UNet2d(
         [1, 28, 28],
         channels=[32, 64, 128],
-        self_condition=not class_conditioned,
+        self_condition=True,
         attention=True,
         use_film=False,
-        n_classes=10 if (class_conditioned) else None,
+        n_classes=None,
     ).to(dev)
 
-    fm = butane.nn.ConditionalFlowMatching(0.01).to(dev)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=7e-4)
-    epochs = 10
+    fm = butane.nn.ConditionalFlowMatching(0.02).to(dev)
+    fm.set_source_distribution(torch.distributions.Independent(torch.distributions.Normal(torch.zeros(1, 28, 28), torch.ones(1, 28, 28)), 3))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    ema = butane.nn.EMA(model=model, decay=0.9999)
+    logger = butane.logger.ModelLogger(".tmp/mnist_fm", overwrite=True)
+
+    epochs = 1000
     for epoch in range(epochs):
         sum_loss = 0.0
-        n_batches = len(dl)
+        sum_grad_norm = 0
         for batch in dl:
             optimizer.zero_grad()
-
             x1 = batch["data"]
             label = batch["targets"]
-            x0 = torch.randn_like(x1)
+            x0 = fm.source_distribution().sample((x1.size(0),)).to(x1.device)
             t = fm.sample_timesteps(x1.size(0))
-            x_t, ut = fm.forward(x0, x1, t)
+            x_t, u_t = fm(x0, x1, t)
 
-            vt = model(x_t.to(dev), t, label if class_conditioned else x1)
-            loss = torch.mean((vt - ut) ** 2)
+            v_t = model(x_t.to(dev), t)
+            loss = torch.mean((v_t - u_t) ** 2)
             loss.backward()
+
+            for p in model.parameters():
+                if p.grad is not None:
+                    sum_grad_norm += (p.grad ** 2).sum().item()
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
             optimizer.step()
+            ema.update()
             sum_loss += loss.item()
 
-        avg_loss = sum_loss / n_batches
-        print(f"Epoch {epoch} -> Loss: {avg_loss}")
-
-    cond = test_ds[:100]["data"]
-    cond_label = test_ds[:100]["targets"]
-    sampled = (
-        fm.flow(
-            model,
-            x0=torch.randn(cond.size(0), 1, 28, 28),
-            n_timesteps=100,
-            condition=cond_label if class_conditioned else cond,
-        )
-        .squeeze()
-        .cpu()
-    )
-    cond = cond.squeeze().cpu()
-    for i in range(sampled.size(0)):
-        fig, ax = plt.subplots(1, 2)
-        ax[0].imshow(sampled[i])
-        ax[1].imshow(cond[i])
-        plt.show()
+        if ((epoch + 1) % 50) == 0:
+            logger.checkpoint(epoch+1, model=model, optimizer=optimizer, ema=ema)
+            ema.apply()
+            model.eval()
+            eval_model(model, fm, logger.output_path)
+            ema.undo()
+            model.train()
+        print(f"Epochs {epoch + 1} -> Loss: {sum_loss/len(dl)} Grad Norm: {sum_grad_norm / len(dl)}")
+    # pretrained_dict = torch.load(".tmp/mnist_fm/checkpoint_1000/model.pt")
+    # model_dict = model.state_dict()
+    # filtered_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+    # model_dict.update(filtered_dict)
+    # model.load_state_dict(model_dict)
+    # eval_model(model, flow_matching=fm)

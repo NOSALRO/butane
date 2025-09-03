@@ -24,7 +24,6 @@ def apply_around_dim(
                 reduced_x = reduced_x.values
         return reduced_x
 
-
 def sum_around(
     x: torch.Tensor, 
     dims: Union[int, Tuple[int]],
@@ -42,3 +41,8 @@ def mean_around(
 ) -> torch.Tensor:
 
     return apply_around_dim(torch.mean, x, dims, keepdim)
+
+def approx_cumulative_normal_function(x: torch.Tensor) -> torch.Tensor:
+    # Formula according to E. Page (1976)
+    y = torch.sqrt((torch.tensor(2.) / torch.pi)) * (x + 0.044715*x.pow(3))
+    return 0.5 * (1. + torch.tanh(y))
