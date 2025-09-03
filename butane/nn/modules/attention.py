@@ -5,7 +5,7 @@ from ..._helpers import _fill_defaults, _prod, module_name
 from ..utils import utils
 from ..._typedefs import *
 
-class SelfAttention(torch.nn.Module):
+class _AttentionTemplate(torch.nn.Module):
 
     def __init__(
         self,
@@ -34,19 +34,24 @@ class SelfAttention(torch.nn.Module):
 
         self.dropout = torch.nn.Dropout(dropout_p)
 
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, x1: torch.Tensor, x2: Optional[torch.Tensor] = None, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
 
-        assert x.dim() == 3, "Attention's input data should be (batch, seq_len, feature_dim)"
-        _x_shape = x.shape[:-1]
+        assert x1.dim() == 3, "Attention's input data should be (batch, seq_len, feature_dim)"
+        if x2 is None:
+            x2 = x1
+        assert x2.dim() == 3, "Attention's input data should be (batch, seq_len, feature_dim)"
 
-        _q = self.query(x)
-        _k = self.key(x)
-        _v = self.value(x)
+        _x1_shape = x1.shape[:-1]
+        _x2_shape = x2.shape[:-1]
+
+        _q = self.query(x1)
+        _k = self.key(x2)
+        _v = self.value(x2)
 
         if self._n_heads > 1:
-            _q = _q.reshape(*_x_shape, self._n_heads, self.d_k).transpose(1, 2)
-            _k = _k.reshape(*_x_shape, self._n_heads, self.d_k).transpose(1, 2)
-            _v = _v.reshape(*_x_shape, self._n_heads, self.d_k).transpose(1, 2)
+            _q = _q.reshape(*_x1_shape, self._n_heads, self.d_k).transpose(1, 2)
+            _k = _k.reshape(*_x2_shape, self._n_heads, self.d_k).transpose(1, 2)
+            _v = _v.reshape(*_x2_shape, self._n_heads, self.d_k).transpose(1, 2)
 
         _qk = torch.matmul(_q, _k.transpose(-1, -2)) / self.scale_factor
 
@@ -54,7 +59,7 @@ class SelfAttention(torch.nn.Module):
             _qk.masked_fill_(mask == 0, float("-inf"))
 
         if self._causal:
-            causal_mask = torch.tril(torch.ones(_x_shape[1], _x_shape[1])).to(x.device)
+            causal_mask = torch.tril(torch.ones(_x1_shape[1], _x1_shape[1])).to(x.device)
             _qk.masked_fill_(causal_mask == 0, float("-inf"))
 
         _attention_weights = torch.softmax(_qk, dim=-1)
@@ -62,12 +67,11 @@ class SelfAttention(torch.nn.Module):
         _attention = torch.matmul(_attention_weights, _v)
 
         if self._n_heads > 1:
-            _attention = _attention.transpose(1, 2).reshape(*_x_shape, self._d_model)
+            _attention = _attention.transpose(1, 2).reshape(*_x1_shape, self._d_model)
 
-        return x + self.linear_projection(_attention.contiguous())
+        return x1 + self.linear_projection(_attention.contiguous())
 
-
-class LocalSelfAttention(torch.nn.Module):
+class _LocalAttentionTemplate(torch.nn.Module):
 
     conv: torch.nn.Module
     N: int
@@ -116,23 +120,28 @@ class LocalSelfAttention(torch.nn.Module):
             else:
                 self.norm = prenorm(self._d_model)
 
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, x1: torch.Tensor, x2: Optional[torch.Tensor] = None, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
 
-        _outermost_dims, _innermost_dims = torch.tensor(x.shape[:self.N]), torch.tensor(x.shape[self.N:])
-        x = x.reshape(*_outermost_dims, -1)
+        if x2 is None:
+            x2 = x1
+
+        _outermost_dims_1, _innermost_dims_1 = torch.tensor(x1.shape[:self.N]), torch.tensor(x1.shape[self.N:])
+        _outermost_dims_2, _innermost_dims_2 = torch.tensor(x2.shape[:self.N]), torch.tensor(x2.shape[self.N:])
+        x1 = x1.reshape(*_outermost_dims_1, -1)
+        x2 = x2.reshape(*_outermost_dims_2, -1)
 
         if self.norm is not None:
-            x = self.norm(x)
+            x1 = self.norm(x1)
 
-        _q = self.query(x)
-        _k = self.key(x)
-        _v = self.value(x)
+        _q = self.query(x1)
+        _k = self.key(x2)
+        _v = self.value(x2)
 
         if self._n_heads > 1:
             # fmt: off
-            _q = _q.reshape(_outermost_dims[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
-            _k = _k.reshape(_outermost_dims[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
-            _v = _v.reshape(_outermost_dims[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
+            _q = _q.reshape(_outermost_dims_1[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
+            _k = _k.reshape(_outermost_dims_2[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
+            _v = _v.reshape(_outermost_dims_2[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
             # fmt: on
 
         _qk = torch.matmul(_q, _k.transpose(-1, -2)) / self.scale_factor
@@ -143,16 +152,35 @@ class LocalSelfAttention(torch.nn.Module):
         _attention = torch.matmul(_attention_weights, _v)
 
         if self._n_heads > 1:
-            _attention = _attention.transpose(-1, -2).reshape(x.shape)
+            _attention = _attention.transpose(-1, -2).reshape(x1.shape)
 
-        x = x + self.projection(_attention.contiguous())
-        return x.reshape(*_outermost_dims, *_innermost_dims)
+        x1 = x1 + self.projection(_attention.contiguous())
+        return x1.reshape(*_outermost_dims_1, *_innermost_dims_1)
 
+class SelfAttention(_AttentionTemplate):
+    def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None):
+        return super().forward(x1, x2=None, mask=mask)
+
+class CrossAttention(_AttentionTemplate): ...
+
+class LocalSelfAttention(_LocalAttentionTemplate):
+    def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None):
+        return super().forward(x1, x2=None, mask=mask)
+
+class LocalCrossAttention(_LocalAttentionTemplate): ...
 
 class LocalSelfAttention1d(LocalSelfAttention):
     conv = torch.nn.Conv1d
     N = 2
 
 class LocalSelfAttention2d(LocalSelfAttention):
+    conv = torch.nn.Conv2d
+    N = 3
+
+class LocalCrossAttention1d(LocalCrossAttention):
+    conv = torch.nn.Conv1d
+    N = 2
+
+class LocalCrossAttention2d(LocalCrossAttention):
     conv = torch.nn.Conv2d
     N = 3
