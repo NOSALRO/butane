@@ -1,2 +1,2 @@
 from .flow_matching import *
-from .ddpm import *
+from .diffusion import *

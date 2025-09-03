@@ -57,8 +57,12 @@ if __name__ == "__main__":
 
     model = TimeDependentModel().to(dev)
 
-    diffusion = butane.nn.DDPM(1000, [0.0001, 0.02]).to(dev)
-    diffusion.beta_cosine_scheduler()
+    diffusion = butane.nn.Diffusion(
+        num_timesteps=1000,
+        scheduler='cosine',
+        variance_type='learned_range',
+        scale_timesteps=True,
+    ).to(dev)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     epochs = 2000
     for epoch in range(epochs):

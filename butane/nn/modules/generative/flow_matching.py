@@ -57,6 +57,7 @@ class FlowMatching(torch.nn.Module):
         else:
             generated_samples = torch.empty_like(x0)
             model_outputs = torch.empty_like(x0)
+        print(generated_samples.size())
 
         if not reverse:
             timesteps = torch.linspace(0., 1., n_timesteps).to(self._dummy_param.device)
@@ -83,7 +84,6 @@ class FlowMatching(torch.nn.Module):
         self,
         model: torch.nn.Module,
         x1: torch.Tensor,
-        source_dist,
         n_timesteps: int,
         condition: Optional[torch.Tensor] = None,
         keep_record: bool = False,
@@ -129,7 +129,7 @@ class FlowMatching(torch.nn.Module):
         for i, _x1 in enumerate(x1):
             sols, log_det, _ = odeint(functools.partial(func, c=condition), (_x1, torch.zeros(_x1.size(0), device=_x1.device)), timesteps, method="euler_likelihood")
             x0 = sols[-1].cpu()
-            log_p0 = source_dist.log_prob(x0).to(self._dummy_param.device)
+            log_p0 = self.__source_distribution.log_prob(x0).to(self._dummy_param.device)
             log_det = log_p0 + log_det[-1]
 
             sols = sols[None,...] if keep_record else sols[-1][None,...]
@@ -137,6 +137,37 @@ class FlowMatching(torch.nn.Module):
             generated_samples[i] = sols
             log_likelihoods[i] = log_det
         return generated_samples.squeeze(0), log_likelihoods.squeeze(0)
+
+    @torch.no_grad()
+    def log_likelihood(
+        self,
+        model: torch.nn.Module,
+        x0: torch.Tensor,
+        n_timesteps: int,
+        condition: Optional[torch.Tensor] = None,
+        multiple_gen_per_condition: bool = False,
+        method: str = 'euler',
+    ) -> torch.Tensor:
+
+        x1 = self.flow(
+            model=model,
+            x0=x0,
+            n_timesteps=n_timesteps,
+            condition=condition,
+            keep_record=False,
+            multiple_gen_per_condition=multiple_gen_per_condition,
+            method=method,
+            return_model_outputs=False,
+        )
+        _, log_likelihood = self.flow_likelihood(
+            model=model,
+            x1=x1.to(self._dummy_param.device),
+            n_timesteps=n_timesteps,
+            condition=condition,
+            keep_record=False,
+            multiple_gen_per_condition=multiple_gen_per_condition,
+        )
+        return x1, log_likelihood
 
 class ConditionalFlowMatching(FlowMatching):
 
