@@ -120,42 +120,59 @@ class _LocalAttentionTemplate(torch.nn.Module):
             else:
                 self.norm = prenorm(self._d_model)
 
-    def forward(self, x1: torch.Tensor, x2: Optional[torch.Tensor] = None, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        x1: torch.Tensor,
+        x2: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
 
         if x2 is None:
             x2 = x1
+        B1, C1, *spatial1 = x1.shape
+        B2, C2, *spatial2 = x2.shape
 
-        _outermost_dims_1, _innermost_dims_1 = torch.tensor(x1.shape[:self.N]), torch.tensor(x1.shape[self.N:])
-        _outermost_dims_2, _innermost_dims_2 = torch.tensor(x2.shape[:self.N]), torch.tensor(x2.shape[self.N:])
-        x1 = x1.reshape(*_outermost_dims_1, -1)
-        x2 = x2.reshape(*_outermost_dims_2, -1)
+        if self.N == 1:
+            x1 = x1.flatten(2)
+            x2 = x2.flatten(2)
+
+        L1 = x1.shape[2:].numel()
+        L2 = x2.shape[2:].numel()
 
         if self.norm is not None:
             x1 = self.norm(x1)
 
-        _q = self.query(x1)
-        _k = self.key(x2)
-        _v = self.value(x2)
+        # conv projections
+        q = self.query(x1)
+        k = self.key(x2)
+        v = self.value(x2)
 
-        if self._n_heads > 1:
-            # fmt: off
-            _q = _q.reshape(_outermost_dims_1[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
-            _k = _k.reshape(_outermost_dims_2[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
-            _v = _v.reshape(_outermost_dims_2[0], self._n_heads, self.d_k, _innermost_dims.prod()).transpose(-1, -2)
-            # fmt: on
+        q = q.flatten(2)
+        k = k.flatten(2)
+        v = v.flatten(2)
 
-        _qk = torch.matmul(_q, _k.transpose(-1, -2)) / self.scale_factor
+        q = q.transpose(1, 2).reshape(B1, L1, self._n_heads, self.d_k).transpose(1, 2)
+        k = k.transpose(1, 2).reshape(B2, L2, self._n_heads, self.d_k).transpose(1, 2)
+        v = v.transpose(1, 2).reshape(B2, L2, self._n_heads, self.d_k).transpose(1, 2)
 
-        _attention_weights = torch.softmax(_qk, dim=-1)
+        _attention_scores = torch.matmul(q, k.transpose(-1, -2)) / self.scale_factor
+
+        _attention_weights = torch.softmax(_attention_scores, dim=-1)
         if hasattr(self, "dropout"):
             _attention_weights = self.dropout(_attention_weights)
-        _attention = torch.matmul(_attention_weights, _v)
 
-        if self._n_heads > 1:
-            _attention = _attention.transpose(-1, -2).reshape(x1.shape)
+        _attention = torch.matmul(_attention_weights, v)
+        _attention = _attention.transpose(1, 2).reshape(B1, L1, C1).transpose(1, 2)
+        _attention = _attention.reshape(B1, C1, *spatial1)
 
-        x1 = x1 + self.projection(_attention.contiguous())
-        return x1.reshape(*_outermost_dims_1, *_innermost_dims_1)
+        if self.N == 1:
+            _attention = _attention.flatten(2)
+            _attention = self.projection(_attention)
+            _attention = _attention.reshape(B1, C1, *spatial1)
+        else:
+            _attention = self.projection(_attention)
+        out = x1.reshape(B1, C1, *spatial1) + _attention
+        return out
 
 class SelfAttention(_AttentionTemplate):
     def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None):
@@ -171,16 +188,16 @@ class LocalCrossAttention(_LocalAttentionTemplate): ...
 
 class LocalSelfAttention1d(LocalSelfAttention):
     conv = torch.nn.Conv1d
-    N = 2
+    N = 1
 
 class LocalSelfAttention2d(LocalSelfAttention):
     conv = torch.nn.Conv2d
-    N = 3
+    N = 2
 
 class LocalCrossAttention1d(LocalCrossAttention):
     conv = torch.nn.Conv1d
-    N = 2
+    N = 1
 
 class LocalCrossAttention2d(LocalCrossAttention):
     conv = torch.nn.Conv2d
-    N = 3
+    N = 2
