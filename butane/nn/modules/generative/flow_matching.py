@@ -57,7 +57,6 @@ class FlowMatching(torch.nn.Module):
         else:
             generated_samples = torch.empty_like(x0)
             model_outputs = torch.empty_like(x0)
-        print(generated_samples.size())
 
         if not reverse:
             timesteps = torch.linspace(0., 1., n_timesteps).to(self._dummy_param.device)
@@ -221,4 +220,38 @@ class MiddleVarianceFlowMatching(FlowMatching):
         epsilon = torch.randn_like(x0)
         x_t = mu_t + sigma_t * epsilon
         u_t = x1 - x0
+        return x_t, u_t
+
+class CurvedFlowMatching(FlowMatching):
+
+    def forward(
+        self,
+        x0: torch.Tensor,
+        x1: torch.Tensor,
+        t: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        while len(x0.size()) != len(t.size()):
+            t = t[..., None]
+        mu_t = (x1 - x0)*(2*t - t**2) + x0
+        sigma_t = self._sigma
+        epsilon = torch.randn_like(x0)
+        x_t = mu_t + sigma_t * epsilon
+        u_t = (x1 - x0)*(2 - 2*t)
+        return x_t, u_t
+
+    @staticmethod
+    def interpolate(
+        x0: torch.Tensor,
+        x1: torch.Tensor,
+        t: torch.Tensor,
+        sigma: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        while len(x0.size()) != len(t.size()):
+            t = t[..., None]
+        mu_t = (x1 - x0)*(2*t - t**2) + x0
+        epsilon = torch.randn_like(x0)
+        x_t = mu_t + sigma * epsilon
+        u_t = (x1 - x0)*(2 - 2*t)
         return x_t, u_t

@@ -392,28 +392,34 @@ class Diffusion(torch.nn.Module):
         x_T: torch.Tensor,
         x_original: torch.Tensor,
         mask: torch.Tensor,
+        multiple_gen_per_mask: bool = False,
         keep_record: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         model.eval()
+        if not multiple_gen_per_mask:
+            x_T = x_T.unsqueeze(0)
 
         if keep_record:
-            generated_samples = torch.empty(self.num_timesteps, *x_T.size())
+            generated_samples = torch.empty(x_T.size(0), self.num_timesteps, *x_T[1:].size())
         else:
             generated_samples = torch.empty_like(x_T)
 
         x_T = x_T.to(self.beta.device)
+        x_original = x_original.to(self.beta.device)
+        mask = mask.to(self.beta.device)
 
         timesteps = reversed(range(0, self.num_timesteps, 1))
-        for i, t in enumerate(timesteps):
-            _t = torch.full((x_T.size(0), 1), t, device=self.beta.device, dtype=torch.int64)
-            out = model(x_T, self.scale_timesteps(_t))
-            x_original_diffused, _ = self.forward(x_original, t)
-            x_T = self.reverse(x_T, _t, out)
-            x_T = x_original_diffused * mask + (1 - mask) * x_T
-            if keep_record:
-                generated_samples[i] = x_T
+        for i, x in enumerate(x_T):
+            for j, t in enumerate(timesteps):
+                _t = torch.full((x.size(0), 1), t, device=self.beta.device, dtype=torch.int64)
+                out = model(x, self.scale_timesteps(_t))
+                x_original_diffused, _ = self.forward(x_original, t)
+                x = self.reverse(x, _t, out)
+                x = x_original_diffused * mask + (1 - mask) * x
+                if keep_record:
+                    generated_samples[i, j] = x
+            if not keep_record:
+                generated_samples[i] = x
         model.train()
-        if not keep_record:
-            return x_T
         return generated_samples
