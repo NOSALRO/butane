@@ -41,14 +41,15 @@ class TimeMLP(torch.nn.Module):
         self.__time_dependent = time_embedding_size is not None
 
         if self.__time_dependent:
-            self.time_embeddings = LearnableEmbeddings(time_embedding_size)
-            # self.time_embeddings = SinusoidalEmbeddings(time_embedding_size)
+            # self.time_embeddings = LearnableEmbeddings(time_embedding_size)
+            self.time_embeddings = SinusoidalEmbeddings(time_embedding_size)
             self.time_projection = MLPBlock(
                 input_dims=time_embedding_size,
                 output_dims=self.__input_dims,
                 hidden_dims=[time_embedding_size * 2],
                 activation_function=[torch.nn.SiLU()],
             )
+            self.__input_dims = self.__input_dims + input_dims
 
         if self_condition:
             self.condition_projection = MLPBlock(
@@ -69,8 +70,6 @@ class TimeMLP(torch.nn.Module):
                 ),
             )
 
-        if self.__time_dependent:
-            self.__input_dims = self.__input_dims + input_dims
         if self_condition or n_classes is not None:
             self.__input_dims = self.__input_dims + input_dims
 
@@ -102,21 +101,3 @@ class TimeMLP(torch.nn.Module):
                 x = torch.cat([x, c], dim=-1)
 
         return self.mlp(x)
-
-    def features(self, x):
-        for m in self.condition_projection[0][:-3]:
-            x = m(x)
-        return x
-
-    def condition_emb(self, x):
-        for m in self.condition_projection[0][-3:]:
-            x = m(x)
-        return x
-
-    def freeze_all_excpet_condition(self):
-        utils.freeze_module(self.mlp)
-        utils.freeze_module(self.time_projection)
-
-    def unfreeze_condition(self):
-        utils.unfreeze_module(self.mlp)
-        utils.unfreeze_module(self.time_projection)
