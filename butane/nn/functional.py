@@ -1,3 +1,4 @@
+from typing import Optional, List
 import torch
 
 
@@ -33,12 +34,14 @@ def kl_div_gaussians(mu1, logvar1, mu2, logvar2) -> torch.Tensor:
     kl_div = 0.5 * (log_det_ratio + k + mahalanobis_distance + trace_term)
     return kl_div
 
-def fgsm(x: torch.Tensor, epsilon: float, normalize: bool = False) -> torch.Tensor:
+def fgsm(x: torch.Tensor, epsilon: float, clip_range: Optional[List[int]] = None) -> torch.Tensor:
     # Fast Gradient Sign Method
     grad = x.grad
-    if normalize:
-        grad = grad / (grad.norm() + 1e-8)
-        petrubated_x = (x - epsilon * grad).detach()
-    else:
-        petrubated_x = (x - epsilon * grad.sign()).detach()
-    return petrubated_x
+    petrurbated_x = (x - epsilon * grad.sign()).detach()
+    return petrurbated_x.clip(clip_range[0], clip_range[1]) if clip_range is not None else petrurbated_x
+
+# def pgm(x: torch.Tensor, epsilon: float, clip_range: Optional[List[int]] = None) -> torch.Tensor:
+#     # Fast Gradient Sign Method
+#     grad = x.grad
+#     petrurbated_x = (x - epsilon * grad.sign()).detach()
+#     return petrurbated_x.clip(clip_range[0], clip_range[1]) if clip_range is not None else petrurbated_x

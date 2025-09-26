@@ -1,5 +1,7 @@
 from typing import Callable, Optional, Union, Tuple
 from functools import partial
+import copy
+import math
 import torch
 from ..._typedefs import *
 from ..modules.residual_blocks import *
@@ -14,8 +16,60 @@ from ..modules.attention import (
 from ..modules.embeddings import SinusoidalEmbeddings, LearnableEmbeddings
 from ..utils import utils
 
+class SelfConditionNd(torch.nn.Module):
+    conv: torch.nn.Module
+
+    def __init__(
+        self,
+        input_dims: IntParams,
+        channels: int,
+        attention: Optional[torch.nn.Module] = None,
+        scale_residual: bool = False,
+    ):
+        super().__init__()
+        self.__input_dims = input_dims
+        self._scale_residual = scale_residual
+
+        self.conv_block_1 = torch.nn.Sequential(
+            self.conv(self.__input_dims[0], channels, 3, padding=1),
+            torch.nn.GroupNorm(32, channels),
+            torch.nn.SiLU(),
+            self.conv(channels, channels, 3, padding=1),
+        )
+
+        # if attention is not None:
+        #     self.attn = attention(channels)
+
+        # self.conv_block_2 = torch.nn.Sequential(
+        #     torch.nn.GroupNorm(32, channels),
+        #     self.conv(channels, channels, 3, padding=1),
+        #     torch.nn.GroupNorm(32, channels),
+        #     torch.nn.SiLU(),
+        #     utils.zero_module(self.conv(channels, channels, 3, padding=1)),
+        # )
+
+        self.shortcut = self.conv(self.__input_dims[0], channels, 1) if self.__input_dims[0] != channels else torch.nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.conv_block_1(x)
+        return h
+        # if hasattr(self, "attn"):
+        #     h = self.attn(h)
+        # h = self.conv_block_2(h)
+        # if self._scale_residual:
+        #     (h + self.shortcut(x)) / math.sqrt(2)
+        # return h + self.shortcut(x)
+
+class SelfCondition1d(SelfConditionNd):
+    conv = torch.nn.Conv1d
+
+class SelfCondition2d(SelfConditionNd):
+    conv = torch.nn.Conv2d
+
+class SelfCondition3d(SelfConditionNd):
+    conv = torch.nn.Conv3d
+
 class ResBlockNd(torch.nn.Module):
-    residual_block_creator: torch.nn.Module
     conv_block: torch.nn.Module
     conv: torch.nn.Module
 
@@ -25,10 +79,12 @@ class ResBlockNd(torch.nn.Module):
         embedding_size: Optional[int] = None,
         scale_shift_norm: bool = False,
         zero_conv: bool = True,
+        scale_residual: bool = False
     ):
         super().__init__()
         self.__input_dims = input_dims
         self._scale_shift_norm = scale_shift_norm
+        self._scale_residual = scale_residual
 
         if embedding_size is not None:
             self.time_projection = MLPBlock(
@@ -75,6 +131,8 @@ class ResBlockNd(torch.nn.Module):
                 h = self.post_embedding(h)
         else:
             h = self.post_embedding(h)
+        if self._scale_residual:
+            (h + self.shortcut(x)) / math.sqrt(2)
         return h + self.shortcut(x)
 
     @property
@@ -113,18 +171,19 @@ class DownsampleNd(torch.nn.Module):
         attention: Optional[torch.nn.Module] = None,
         scale_shift_norm: bool = False,
         zero_conv: bool = True,
+        scale_residual: bool = False,
     ):
         super().__init__()
 
         self.__input_dims = input_dims
 
-        self.residual_block1 = self.residual_block_creator(input_dims, channels, embedding_size, scale_shift_norm, zero_conv)
+        self.residual_block1 = self.residual_block_creator(input_dims, channels, embedding_size, scale_shift_norm, zero_conv, scale_residual)
         residual_input = utils.calculate_output_size(self.residual_block1, input_dims=self.__input_dims)
 
         if attention is not None:
             self.attn = attention(channels)
 
-        self.residual_block2 = self.residual_block_creator(residual_input, channels, embedding_size, scale_shift_norm, zero_conv)
+        self.residual_block2 = self.residual_block_creator(residual_input, channels, embedding_size, scale_shift_norm, zero_conv, scale_residual)
         self.down = self.conv(channels, channels, 3, stride=2, padding=1)
 
     def forward(
@@ -171,7 +230,8 @@ class UpsampleNd(torch.nn.Module):
         embedding_size: int,
         attention: Optional[torch.nn.Module] = None,
         scale_shift_norm: bool = False,
-        zero_conv: bool = False
+        zero_conv: bool = True,
+        scale_residual: bool = False
     ):
         super().__init__()
 
@@ -187,7 +247,8 @@ class UpsampleNd(torch.nn.Module):
             channels,
             embedding_size,
             scale_shift_norm,
-            zero_conv
+            zero_conv,
+            scale_residual
         )
 
         if attention is not None:
@@ -199,7 +260,8 @@ class UpsampleNd(torch.nn.Module):
             channels,
             embedding_size,
             scale_shift_norm,
-            zero_conv
+            zero_conv,
+            scale_residual
         )
 
     def forward(
@@ -251,6 +313,7 @@ class UNetNd(torch.nn.Module):
     downsample: torch.nn.Module
     upsample: torch.nn.Module
     attention: torch.nn.Module
+    condition_block: torch.nn.Module
     N: int
 
     def __init__(
@@ -263,11 +326,15 @@ class UNetNd(torch.nn.Module):
         self_condition: bool = False,
         use_film: bool = True,
         use_scale_shift_norm: bool = True,
+        n_heads: int = 4,
         n_classes: Optional[int] = None,
         n_middle_blocks: int = 2,
         condition_input_dims: IntParams = None,
         output_channels: Optional[int] = None,
-        zero_conv: bool = True
+        zero_conv: bool = True,
+        concat_condition: bool = False,
+        attention_dropout: float = 0.0,
+        scale_residual: bool = False,
     ):
         assert (not self_condition and n_classes is not None) or (self_condition and n_classes is None) or (not self_condition and n_classes is None), "You can use either self-condition or class-codition"
         super().__init__()
@@ -276,8 +343,11 @@ class UNetNd(torch.nn.Module):
         self._use_film = use_film
         self._use_scale_shift_norm = use_scale_shift_norm
         self._self_condition = self_condition
-        self._condition_input_dims = condition_input_dims if condition_input_dims is not None else self.__input_dims
+        self._condition_input_dims = condition_input_dims if condition_input_dims is not None else copy.copy(self.__input_dims)
+        self._concat_condition = concat_condition
         self._output_channels = output_channels if output_channels is not None else self.__input_dims[0]
+        if self._concat_condition:
+            self.__input_dims[0] += self._condition_input_dims[0]
         if not attention:
             attention_resolution = []
         else:
@@ -286,10 +356,10 @@ class UNetNd(torch.nn.Module):
         self._attention_resoluiton = attention_resolution
 
         self.attention = partial(
-            self.attention,
+            self.attention_block,
             kernel_size=1,
-            n_heads=1,
-            dropout_p=0.0,
+            n_heads=n_heads,
+            dropout_p=attention_dropout,
             prenorm=partial(torch.nn.GroupNorm, num_groups=32),
             bias=True,
             zero_conv=zero_conv,
@@ -310,25 +380,21 @@ class UNetNd(torch.nn.Module):
             activation_function=[torch.nn.SiLU()],
         )
 
-        if self_condition:
-            _cond_channels = self._channels[0] * 2 if (use_film and self.N > 1) else self._channels[0]
-            _condition_conv = self.conv_block(
+        if self_condition:# and not self._concat_condition:
+            _condition_conv = self.condition_block(
                 input_dims=self._condition_input_dims,
-                channels=[max(_cond_channels // 2, 32), _cond_channels],
-                activation_function=[torch.nn.SiLU()],
-                output_activation=False,
-                conv_pad=[1],
-                normalization=[True],
-                normalization_type=partial(torch.nn.GroupNorm, num_groups=32)
+                channels=self._channels[0],
+                scale_residual=scale_residual,
+                # attention=self.attention
             )
             self.condition_projection = torch.nn.Sequential(
                 _condition_conv,
+                torch.nn.Flatten(1),
             )
-            if self.N == 1:
-                self.condition_projection.extend([
-                    torch.nn.Flatten(1),
-                    torch.nn.Linear(_condition_conv_out.prod(), self._channels[0] * 2 if use_film else self._channels[0])
-                ])
+            _cond_flat_size = utils.calculate_output_size(self.condition_projection, input_dims=self._condition_input_dims)
+            self.condition_projection.extend([
+                torch.nn.Linear(_cond_flat_size, time_embedding_size * 2 if use_film else time_embedding_size)
+            ])
             if self._use_film:
                 self.init_layer.append(torch.nn.GroupNorm(32, self._channels[0]))
 
@@ -349,6 +415,7 @@ class UNetNd(torch.nn.Module):
                     attention=self.attention if (i + 1) in self._attention_resoluiton else None,
                     scale_shift_norm=self._use_scale_shift_norm,
                     zero_conv=zero_conv,
+                    scale_residual=scale_residual,
                 )
             )
             input_sz = self.down_blocks[-1].output_size
@@ -364,6 +431,7 @@ class UNetNd(torch.nn.Module):
                     embedding_size=time_embedding_size,
                     scale_shift_norm=self._use_scale_shift_norm,
                     zero_conv=zero_conv,
+                    scale_residual=scale_residual,
                 )
             )
             if attention and (i + 1) < n_middle_blocks:
@@ -379,15 +447,50 @@ class UNetNd(torch.nn.Module):
                     attention=self.attention if (i + 1) in self._attention_resoluiton else None,
                     scale_shift_norm=self._use_scale_shift_norm,
                     zero_conv=zero_conv,
+                    scale_residual=scale_residual,
                 )
             )
             input_sz = self.up_blocks[-1].output_size
+
+        if self._concat_condition:
+            self._concated_condition_projection = self.residual_block_creator(
+                input_sz * 2,
+                input_sz[0],
+                embedding_size=time_embedding_size,
+                scale_shift_norm=self._use_scale_shift_norm,
+                zero_conv=False,
+                scale_residual=scale_residual,
+            )
 
         self.out_conv = torch.nn.Sequential(
             torch.nn.GroupNorm(32, input_sz[0]),
             torch.nn.SiLU(),
             utils.zero_module(self.conv(input_sz[0], self._output_channels, 3, padding=1))
         )
+
+    def conditioning(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor = None,
+        c: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if t is not None:
+            t = self.time_embeddings(t)
+            t = self.time_projection(t)
+
+        # if self._concat_condition:
+        #     return x, t, c
+
+        if c is not None and hasattr(self, "condition_projection"):
+            c = self.condition_projection(c)
+            if self._use_film:
+                gamma, beta = c.chunk(2, dim=1)
+
+        if c is not None and self._self_condition:
+            t = gamma * t + beta if self._use_film else t + c
+
+        return x, t, c
+
 
     def forward(
         self,
@@ -396,24 +499,15 @@ class UNetNd(torch.nn.Module):
         c: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
 
-        if t is not None:
-            t = self.time_embeddings(t)
-            t = self.time_projection(t)
-
-        if c is not None and hasattr(self, "condition_projection"):
-            c = self.condition_projection(c)
-            if self._self_condition:
-                while c.dim() != x.dim():
-                    c = c[..., None]
-            if self._use_film:
-                gamma, beta = c.chunk(2, dim=1)
+        if c is not None and self._concat_condition:
+            x = torch.cat([x, c], dim=1)
 
         x = self.init_layer(x)
-        # x = self.cross_att(x, c)
-        if c is not None and self._self_condition:
-            x = gamma * x + beta if self._use_film else x + c
-        elif c is not None and not self._self_condition:
-            t = gamma * t + beta if self._use_film else t + c
+
+        if c is not None and self._concat_condition:
+            r = x.clone()
+
+        x, t, c = self.conditioning(x, t, c)
 
         _skip_connection = []
         for down in self.down_blocks:
@@ -425,6 +519,11 @@ class UNetNd(torch.nn.Module):
 
         for up, skip in zip(self.up_blocks, reversed(_skip_connection)):
             x = up(x, skip, t)
+
+        if self._concat_condition:
+            x = torch.cat([x, r], dim=1)
+            x = self._concated_condition_projection(x)
+
         return self.out_conv(x)
 
     def encode(
@@ -433,24 +532,16 @@ class UNetNd(torch.nn.Module):
         t: torch.Tensor = None,
         c: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        if t is not None:
-            t = self.time_embeddings(t)
-            t = self.time_projection(t)
 
-        if c is not None and hasattr(self, "condition_projection"):
-            c = self.condition_projection(c)
-            if self._self_condition:
-                while c.dim() != x.dim():
-                    c = c[..., None]
-            if self._use_film:
-                gamma, beta = c.chunk(2, dim=1)
+        if c is not None and self._concat_condition:
+            x = torch.cat([x, c], dim=1)
 
         x = self.init_layer(x)
 
-        if c is not None and self._self_condition:
-            x = gamma * x + beta if self._use_film else x + c
-        elif c is not None and not self._self_condition:
-            t = gamma * t + beta if self._use_film else t + c
+        if c is not None and self._concat_condition:
+            r = x.clone()
+
+        x, t, c = self.conditioning(x, t, c)
 
         for down in self.down_blocks:
             x, _ = down(x, t)
@@ -467,7 +558,8 @@ class UNet1d(UNetNd):
     residual_block_creator = ResBlock1d
     downsample = Downsample1d
     upsample = Upsample1d
-    attention = LocalSelfAttention1d
+    attention_block = LocalSelfAttention1d
+    condition_block = SelfCondition1d
     N = 1
 
 class UNet2d(UNetNd):
@@ -478,7 +570,8 @@ class UNet2d(UNetNd):
     residual_block_creator = ResBlock2d
     downsample = Downsample2d
     upsample = Upsample2d
-    attention = LocalSelfAttention1d
+    attention_block = LocalSelfAttention1d
+    condition_block = SelfCondition2d
     N = 2
 
 class UNet3d(UNetNd):
@@ -489,5 +582,6 @@ class UNet3d(UNetNd):
     residual_block_creator = ResBlock3d
     downsample = Downsample3d
     upsample = Upsample3d
-    attention = LocalSelfAttention2d
+    attention_block = LocalSelfAttention2d
+    condition_block = SelfCondition3d
     N = 3
