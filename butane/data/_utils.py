@@ -30,14 +30,10 @@ def batch_arange(
     if len(torch.unique(starts - stops)) != 1:
         raise TypeError
 
-    # Ensure steps are integers
     steps = steps.to(dtype=torch.int64)
 
-    # Prepare the list for stacking ranges
     aranges = []
     for start, stop, step in zip(starts, stops, steps):
-        # Append the arange result for each batch
         aranges.append(torch.arange(start, stop, step, dtype=torch.int64).unsqueeze(0))
 
-    # Stack the resulting ranges into a single tensor
     return torch.vstack(aranges)
