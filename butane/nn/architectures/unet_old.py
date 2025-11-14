@@ -87,16 +87,12 @@ class ResBlockNd(torch.nn.Module):
         self._scale_residual = scale_residual
 
         if embedding_size is not None:
-            # self.time_projection = MLPBlock(
-            #     input_dims=embedding_size,
-            #     output_dims=2 * channels if self._scale_shift_norm else channels,
-            #     hidden_dims=[embedding_size * 2],
-            #     activation_function=[torch.nn.SiLU()],
-            # )
-            self.time_projection = torch.nn.Sequential(
-                torch.nn.SiLU(),
-                torch.nn.Linear(embedding_size, 2 * channels if self._scale_shift_norm else channels)
-        )
+            self.time_projection = MLPBlock(
+                input_dims=embedding_size,
+                output_dims=2 * channels if self._scale_shift_norm else channels,
+                hidden_dims=[embedding_size * 2],
+                activation_function=[torch.nn.SiLU()],
+            )
 
         self.pre_embedding = torch.nn.Sequential(
             torch.nn.GroupNorm(32, self.__input_dims[0]),
@@ -177,21 +173,19 @@ class DownsampleNd(torch.nn.Module):
         scale_shift_norm: bool = False,
         zero_conv: bool = True,
         scale_residual: bool = False,
-        bypass_downsample: bool = False,
     ):
         super().__init__()
 
         self.__input_dims = input_dims
-        self.residual_block = self.residual_block_creator(self.__input_dims, channels, embedding_size, scale_shift_norm, zero_conv, scale_residual)
+
+        self.residual_block1 = self.residual_block_creator(input_dims, channels, embedding_size, scale_shift_norm, zero_conv, scale_residual)
+        residual_input = utils.calculate_output_size(self.residual_block1, input_dims=self.__input_dims)
 
         if attention is not None:
             self.attn = attention(channels)
 
-        self.bypass_downsample = bypass_downsample
-        if not self.bypass_downsample:
-            self.down = self.conv(channels, channels, 3, stride=2, padding=1)
-        else:
-            self.down = torch.nn.Identity()
+        self.residual_block2 = self.residual_block_creator(residual_input, channels, embedding_size, scale_shift_norm, zero_conv, scale_residual)
+        self.down = self.conv(channels, channels, 3, stride=2, padding=1)
 
     def forward(
         self,
@@ -199,9 +193,10 @@ class DownsampleNd(torch.nn.Module):
         t: torch.Tensor = None,
     ) -> torch.Tensor:
 
-        x = self.residual_block(x, t)
+        x = self.residual_block1(x, t)
         if hasattr(self, "attn"):
             x = self.attn(x)
+        x = self.residual_block2(x, t)
         return self.down(x), x
 
     @property
@@ -227,7 +222,6 @@ class Downsample3d(DownsampleNd):
 
 class UpsampleNd(torch.nn.Module):
     conv_transpose: torch.nn.Module
-    conv: torch.nn.Module
     residual_block_creator: torch.nn.Module
 
     def __init__(
@@ -238,23 +232,38 @@ class UpsampleNd(torch.nn.Module):
         attention: Optional[torch.nn.Module] = None,
         scale_shift_norm: bool = False,
         zero_conv: bool = True,
-        scale_residual: bool = False,
-        bypass_upsample: bool = False,
+        scale_residual: bool = False
     ):
         super().__init__()
 
-        self.__input_dims = copy.deepcopy(input_dims)
+        self.__input_dims = input_dims
+        self.__channels = channels
 
-        self.residual_block = self.residual_block_creator(self.__input_dims, channels, embedding_size, scale_shift_norm, zero_conv, scale_residual)
+        self.up = self.conv_transpose(self.__input_dims[0], channels, 4, stride=2, padding=1)
+        residual_input = utils.calculate_output_size(self.up, input_dims=self.__input_dims)
+        residual_input[0] = channels*2
+
+        self.residual_block1 = self.residual_block_creator(
+            residual_input,
+            channels,
+            embedding_size,
+            scale_shift_norm,
+            zero_conv,
+            scale_residual
+        )
 
         if attention is not None:
             self.attn = attention(channels)
-        
-        self._bypass_upsample = bypass_upsample
-        if not self._bypass_upsample:
-            self.upsample_refinement = self.conv(channels, channels, 3, padding=1)
-        else:
-            self.upsample_refinement = torch.nn.Identity()
+
+        residual_input = self.residual_block1.output_size
+        self.residual_block2 = self.residual_block_creator(
+            residual_input,
+            channels,
+            embedding_size,
+            scale_shift_norm,
+            zero_conv,
+            scale_residual
+        )
 
     def forward(
         self,
@@ -263,39 +272,37 @@ class UpsampleNd(torch.nn.Module):
         t: torch.Tensor = None,
     ) -> torch.Tensor:
 
+        x = self.up(x)
+
+        if x.shape[2:] != skip.shape[2:]:
+            x = torch.nn.functional.interpolate(x, size=skip.shape[2:], mode="nearest")
+
         x = torch.cat([x, skip], dim=1)
-        #TODO: 3D case, we dont need to scale time
-        x = self.residual_block(x, t)
+        x = self.residual_block1(x, t)
         if hasattr(self, "attn"):
             x = self.attn(x)
-        if not self._bypass_upsample:
-            x = torch.nn.functional.interpolate(
-                x, scale_factor=2, mode='nearest'
-            )
-            x = self.upsample_refinement(x)
+        x = self.residual_block2(x, t)
         return x
 
+    @property
     @torch.no_grad()
     def output_size(self) -> torch.Tensor:
         _input = torch.randn(1, *self.__input_dims)
-        _input, _skip = _input.chunk(2, dim=1)
+        _skip = torch.randn(1, self.__channels, *self.__input_dims[1:])
         _out = self(_input, _skip)
         _sz = torch.tensor(_out.size())[1:]
         return _sz
 
 class Upsample1d(UpsampleNd):
     conv_transpose = torch.nn.ConvTranspose1d
-    conv = torch.nn.Conv1d
     residual_block_creator = ResBlock1d
 
 class Upsample2d(UpsampleNd):
     conv_transpose = torch.nn.ConvTranspose2d
-    conv = torch.nn.Conv2d
     residual_block_creator = ResBlock2d
 
 class Upsample3d(UpsampleNd):
     conv_transpose = torch.nn.ConvTranspose3d
-    conv = torch.nn.Conv3d
     residual_block_creator = ResBlock3d
 
 class UNetNd(torch.nn.Module):
@@ -315,7 +322,6 @@ class UNetNd(torch.nn.Module):
         input_dims: IntParams,
         channels: IntParams = [32, 64],
         time_embedding_size: int = 256,
-        n_residual_blocks: int = 2,
         attention: bool = False,
         attention_resolution: IntParams = [],
         self_condition: bool = False,
@@ -349,7 +355,6 @@ class UNetNd(torch.nn.Module):
             if len(attention_resolution) == 0:
                 attention_resolution = list(range(1, len(self._channels) + 1))
         self._attention_resoluiton = attention_resolution
-        self._n_residual_blocks = n_residual_blocks
 
         self.attention = partial(
             self.attention_block,
@@ -363,17 +368,18 @@ class UNetNd(torch.nn.Module):
 
         self.init_layer = torch.nn.Sequential(
             self.conv(self.__input_dims[0], self._channels[0], 3, padding=1),
+            torch.nn.GroupNorm(32, self._channels[0]),
+            torch.nn.SiLU(),
         )
 
         self.time_embeddings = SinusoidalEmbeddings(time_embedding_size)
         # self.time_embeddings = LearnableEmbeddings(time_embedding_size)
         self.time_projection = MLPBlock(
             input_dims=time_embedding_size,
-            output_dims=time_embedding_size * 4,
+            output_dims=time_embedding_size,
             hidden_dims=[time_embedding_size * 4],
             activation_function=[torch.nn.SiLU()],
         )
-        time_embedding_size *= 4
 
         if self_condition:# and not self._concat_condition:
             _condition_conv = self.condition_block(
@@ -401,23 +407,19 @@ class UNetNd(torch.nn.Module):
 
         self.down_blocks = torch.nn.ModuleList()
         input_sz = utils.calculate_output_size(self.init_layer, input_dims=self.__input_dims)
-        downsample_channels = [self._channels[0]]
         for i, ch in enumerate(self._channels):
-            for j in range(self._n_residual_blocks):
-                self.down_blocks.append(
-                    self.downsample(
-                        input_sz,
-                        ch,
-                        embedding_size=time_embedding_size,
-                        attention=self.attention if (i + 1) in self._attention_resoluiton else None,
-                        scale_shift_norm=self._use_scale_shift_norm,
-                        zero_conv=zero_conv,
-                        scale_residual=scale_residual,
-                        bypass_downsample=(i == len(self._channels) - 1) or (j != self._n_residual_blocks -1)
-                    )
+            self.down_blocks.append(
+                self.downsample(
+                    input_sz,
+                    ch,
+                    embedding_size=time_embedding_size,
+                    attention=self.attention if (i + 1) in self._attention_resoluiton else None,
+                    scale_shift_norm=self._use_scale_shift_norm,
+                    zero_conv=zero_conv,
+                    scale_residual=scale_residual,
                 )
-                input_sz = self.down_blocks[-1].output_size
-            downsample_channels.extend([ch] * (n_residual_blocks + (0 if (i == len(self._channels) - 1) else 1)))
+            )
+            input_sz = self.down_blocks[-1].output_size
 
         self.middle_blocks = torch.nn.ModuleList()
         input_sz = input_sz
@@ -433,26 +435,23 @@ class UNetNd(torch.nn.Module):
                     scale_residual=scale_residual,
                 )
             )
-            if attention and (i + 1) != n_middle_blocks:
+            if attention and (i + 1) < n_middle_blocks:
                 self.middle_blocks.append(self.attention(input_sz[0]))
 
         self.up_blocks = torch.nn.ModuleList()
         for i, ch in reversed(list(enumerate(self._channels))):
-            for j in range(self._n_residual_blocks + 1):
-                input_sz[0] += downsample_channels.pop()
-                self.up_blocks.append(
-                    self.upsample(
-                        input_sz,
-                        ch,
-                        embedding_size=time_embedding_size,
-                        attention=self.attention if (i + 1) in self._attention_resoluiton else None,
-                        scale_shift_norm=self._use_scale_shift_norm,
-                        zero_conv=zero_conv,
-                        scale_residual=scale_residual,
-                        bypass_upsample=(j != self._n_residual_blocks) or (i == 0)
-                    )
+            self.up_blocks.append(
+                self.upsample(
+                    input_sz,
+                    ch,
+                    embedding_size=time_embedding_size,
+                    attention=self.attention if (i + 1) in self._attention_resoluiton else None,
+                    scale_shift_norm=self._use_scale_shift_norm,
+                    zero_conv=zero_conv,
+                    scale_residual=scale_residual,
                 )
-                input_sz = self.up_blocks[-1].output_size()
+            )
+            input_sz = self.up_blocks[-1].output_size
 
         if self._concat_condition:
             self._concated_condition_projection = self.residual_block_creator(
@@ -504,20 +503,17 @@ class UNetNd(torch.nn.Module):
         if c is not None and self._concat_condition:
             x = torch.cat([x, c], dim=1)
 
-        _skip_connection = []
         x = self.init_layer(x)
-        _skip_connection.append(x)
 
         if c is not None and self._concat_condition:
             r = x.clone()
 
         x, t, c = self.conditioning(x, t, c)
 
+        _skip_connection = []
         for down in self.down_blocks:
             x, _skip = down(x, t)
             _skip_connection.append(_skip)
-            if not down.bypass_downsample:
-                _skip_connection.append(x)
 
         for mb in self.middle_blocks:
             x = mb(x, t)

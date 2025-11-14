@@ -46,10 +46,10 @@ class TimeMLP(torch.nn.Module):
             self.time_projection = MLPBlock(
                 input_dims=time_embedding_size,
                 output_dims=self.__input_dims,
-                hidden_dims=[time_embedding_size * 2],
+                hidden_dims=[time_embedding_size * 4],
                 activation_function=[torch.nn.SiLU()],
             )
-            self.__input_dims = self.__input_dims + input_dims
+            # self.__input_dims = self.__input_dims + input_dims
 
         if self_condition:
             self.condition_projection = MLPBlock(
@@ -71,7 +71,7 @@ class TimeMLP(torch.nn.Module):
             )
 
         if self_condition or n_classes is not None:
-            self.__input_dims = self.__input_dims + input_dims
+            self.__input_dims = self.__input_dims + input_dims + input_dims
 
         self.mlp = MLPBlock(
             input_dims=self.__input_dims,
