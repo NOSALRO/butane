@@ -1,3 +1,4 @@
+import argparse
 from functools import partial
 import torch
 import numpy as np
@@ -7,15 +8,17 @@ import matplotlib.pyplot as plt
 @torch.no_grad()
 def eval_model(model, flow_matching, fpath=None):
     x0 = flow_matching.source_distribution().sample((10,))
+    test_cond = (torch.jit.load("data/mnist_data.pt").state_dict()["0"] * 2) - 1
     generations = flow_matching.flow(
         model=model,
         x0=x0,
         n_timesteps=100,
-        condition=torch.randn_like(x0),
+        # condition=torch.randn_like(x0),
+        condition=test_cond[5000: 5010],
         multiple_gen_per_condition=False,
         keep_record=True,
     )
-    generations = generations.moveaxis(1, -1).cpu()
+    generations = generations[0, -1].moveaxis(1, -1).cpu()
     for i in range(generations.size(0)):
         fig, ax = plt.subplots()
         ax.imshow(generations[i])
@@ -28,17 +31,24 @@ def eval_model(model, flow_matching, fpath=None):
 
 if __name__ == "__main__":
 
+    parrser = argparse.ArgumentParser()
+    parsers.add_argument("--eval", action='store_true', default=False, dtype=bool)
+    parsers.add_argument("--fpath", dtype=str)
+    args = parser.parse_args()
+
     dev = torch.device("cuda")
 
     ds = butane.data.Dataset(
         (torch.jit.load("data/mnist_data.pt").state_dict()["0"] * 2) - 1,
         torch.jit.load("data/mnist_targets.pt").state_dict()["0"],
+        on_demand_device_load=True,
+        device='cpu'
     )
 
     ds.to(dev)
     test_ds = ds.split(0.9)
-    butane.data.ops.drop_to_max_size(ds, 5000)
-    dl = torch.utils.data.DataLoader(ds, batch_size=64, shuffle=True)
+    butane.data.ops.drop_to_max_size(ds, 40_000)
+    dl = torch.utils.data.DataLoader(ds, batch_size=256, shuffle=True, pin_memory=False)
 
     class_conditioned = False
 
@@ -46,18 +56,22 @@ if __name__ == "__main__":
         [1, 28, 28],
         channels=[32, 64, 128],
         self_condition=True,
+        attention_resolution=[3],
         attention=True,
-        use_film=False,
+        use_film=True,
         n_classes=None,
+        use_scale_shift_norm=True,
+        scale_residual=False,
+        n_residual_blocks=4,
     ).to(dev)
 
     fm = butane.nn.ConditionalFlowMatching(0.02).to(dev)
     fm.set_source_distribution(torch.distributions.Independent(torch.distributions.Normal(torch.zeros(1, 28, 28), torch.ones(1, 28, 28)), 3))
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     ema = butane.nn.EMA(model=model, decay=0.9999)
-    logger = butane.logger.ModelLogger(".tmp/mnist_fm", overwrite=True)
+    logger = butane.logger.ModelLogger(".tmp/mnist_fm_tb", overwrite=True)
 
-    epochs = 1000
+    epochs = 10000
     for epoch in range(epochs):
         sum_loss = 0.0
         sum_grad_norm = 0
@@ -69,7 +83,7 @@ if __name__ == "__main__":
             t = fm.sample_timesteps(x1.size(0))
             x_t, u_t = fm(x0, x1, t)
 
-            v_t = model(x_t.to(dev), t)
+            v_t = model(x_t.to(dev), t, x1)
             loss = torch.mean((v_t - u_t) ** 2)
             loss.backward()
 
@@ -82,17 +96,16 @@ if __name__ == "__main__":
             ema.update()
             sum_loss += loss.item()
 
-        if ((epoch + 1) % 50) == 0:
-            logger.checkpoint(epoch+1, model=model, optimizer=optimizer, ema=ema)
+        logger.add_stats(loss=sum_loss/len(dl))
+        print(f"Epochs {epoch + 1} -> Loss: {sum_loss/len(dl)} Grad Norm: {sum_grad_norm / len(dl)}")
+        if ((epoch + 1) % 10) == 0:
+            logger.checkpoint(epoch + 1, model=model, optimizer=optimizer, ema=ema)
             ema.apply()
             model.eval()
             eval_model(model, fm, logger.output_path)
             ema.undo()
             model.train()
-        print(f"Epochs {epoch + 1} -> Loss: {sum_loss/len(dl)} Grad Norm: {sum_grad_norm / len(dl)}")
-    # pretrained_dict = torch.load(".tmp/mnist_fm/checkpoint_1000/model.pt")
-    # model_dict = model.state_dict()
-    # filtered_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-    # model_dict.update(filtered_dict)
-    # model.load_state_dict(model_dict)
-    # eval_model(model, flow_matching=fm)
+            logger.checkpoint(epoch+1, model=model, optimizer=optimizer, ema=ema)
+
+    model.eval()
+    eval_model(model, flow_matching=fm)

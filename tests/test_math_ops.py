@@ -33,5 +33,11 @@ class TestMathOps(unittest.TestCase):
         max_v = butane.apply_around_dim(torch.max, x, 1)
         print(max_v.size())
 
+    def test_odeint(self):
+        func = lambda t, x, y: (x, y)
+        x = torch.randn(4, 5)
+        y = torch.zeros_like(x)
+        print(butane.math.odeint(func, (x, y), torch.linspace(0, 1, 10), 'euler')[0])
+
 if __name__ == '__main__':
     unittest.main()
