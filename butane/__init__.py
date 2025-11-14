@@ -14,6 +14,8 @@ from butane.nn import (
 
 from butane.data import (
     ops as ops,
+    toy as toy,
 )
 
 from butane.math.ops import *
+from ._utils import *
