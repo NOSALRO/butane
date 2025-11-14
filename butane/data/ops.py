@@ -1,4 +1,5 @@
 from typing import Optional, Callable, Union, Tuple, List
+import warnings
 import copy
 import math
 
@@ -22,13 +23,37 @@ def drop(dataset: butane.data.Dataset, prec: float) -> None:
     if dataset.targets.numel() != 0:
         dataset.targets = dataset.targets[idx_to_keep]
 
-def drop_to_max_size(dataset: butane.data.Dataset, max_size: int) -> None:
+def drop_to_max_size(dataset: butane.data.Dataset, max_size: int, respect_targets: bool = False) -> None:
     if max_size >= len(dataset):
         return
-    idx_to_keep = torch.randperm(len(dataset))[:max_size]
-    dataset.data = dataset.data[idx_to_keep]
-    if dataset.targets.numel() != 0:
-        dataset.targets = dataset.targets[idx_to_keep]
+    if respect_targets and dataset.targets.dim() > 1:
+        warnings.warn("butane.data.ops.drop_to_max_size: Targets are not class labels, respect_targets is now False", UserWarning)
+        respect_targets = False
+    if not respect_targets:
+        idx_to_keep = torch.randperm(len(dataset))[:max_size]
+        dataset.data = dataset.data[idx_to_keep]
+        if dataset.targets.numel() != 0:
+            dataset.targets = dataset.targets[idx_to_keep]
+    else:
+        unique_targets = torch.unique(dataset.targets)
+        instances_per_target = max_size // len(unique_targets)
+        new_data, new_targets = [], []
+        for _t in unique_targets:
+            _selected_data = dataset.data[dataset.targets == _t]
+            _selected_data = _selected_data[torch.randperm(_selected_data.size(0))[:instances_per_target]]
+            new_data.append(_selected_data)
+            new_targets.append(
+                torch.full(
+                    size=(_selected_data.size(0),),
+                    fill_value=_t,
+                    dtype=dataset.targets.dtype,
+                    device=dataset.targets.device
+                ))
+        new_data = torch.cat(new_data, dim=0)
+        new_targets = torch.cat(new_targets, dim=0)
+        shuffle = torch.randperm(new_data.size(0))
+        dataset.data = new_data[shuffle]
+        dataset.targets = new_targets[shuffle]
 
 def bagging(dataset: butane.data.Dataset, n_learners: int) -> list[butane.data.Dataset,...]:
     indexes = torch.randperm(dataset.data.size(0))
@@ -63,4 +88,3 @@ def trim(dataset: butane.data.Dataset, threshold) -> butane.data.Dataset:
     dataset.data = data[:, start_index:end_index + 1, ...]
 
     return dataset
-
