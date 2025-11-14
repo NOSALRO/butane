@@ -45,9 +45,22 @@ def load_state(
     *,
     model: ModuleParams,
     optimizer: Optional[torch.optim.Optimizer] = None,
+    lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
     ema: ModuleParams = None,
     scaler: Optional[torch.nn.Module] = None
 ):
+
+    def __load(obj, key):
+        if obj is None:
+            return None
+        if not isinstance(obj, (list, tuple)):
+            _state = torch.load(f"{fpath}/{key}.pt", map_location=_device) if cp is None else cp[key]
+            obj.load_state_dict(_state)
+        elif isinstance(obj, (list, tuple)):
+                for i, m in enumerate(obj, start=1):
+                    _state = torch.load(f"{fpath}/{key}_{i}.pt", map_location=_device[i]) if cp is None else cp[f'{key}_{i}']
+                    m.load_state_dict(_state)
+        return obj
 
     returns = {}
     if not os.path.exists(fpath):
@@ -63,28 +76,14 @@ def load_state(
     else:
         raise ("Model should be either torch.nn.Module or list of torch.nn.Modules")
 
-    if isinstance(model, torch.nn.Module):
-        model.load_state_dict(torch.load(f"{fpath}/model.pt", map_location=_device, weights_only=True))
-    elif isinstance(model, (list, tuple)):
-            for i, m in enumerate(model):
-                m.load_state_dict(torch.load(f"{fpath}/model_{i}.pt", map_location=_device[i], weights_only=True))
-    returns["model"] = model
+    cp = None
+    if os.path.exists(fpath + "/checkpoint.pt"):
+        cp = torch.load(fpath + "/checkpoint.pt", map_location=_device)
 
-
-    if optimizer is not None:
-        optimizer.load_state_dict(torch.load(f"{fpath}/optimizer.pt", map_location=optimizer.param_groups[0]['params'][0].device, weights_only=True))
-        returns["optimizer"] = optimizer
-
-    if ema is not None:
-        if isinstance(ema, torch.nn.Module):
-            ema.load_state_dict(torch.load(f"{fpath}/ema.pt", map_location=_device, weights_only=True))
-        elif isinstance(model, (list, tuple)):
-                for i, m in enumerate(ema):
-                    m.load_state_dict(torch.load(f"{fpath}/ema_{i}.pt", map_location=_device[i], weights_only=True))
-        returns["ema"] = ema
-
-    if scaler is not None:
-        scaler.load_state_dict(torch.load(f"{fpath}/scaler.pt", map_location=_device, weights_only=True))
-        returns["scaler"] = scaler
+    returns["model"] = __load(model, "model")
+    returns["optimizer"] = __load(optimizer, "optimizer")
+    returns["ema"] = __load(ema, "ema")
+    returns["lr_scheduler"] = __load(lr_scheduler, "lr_scheduler")
+    returns["scaler"] = __load(scaler, "scaler")
 
     return returns
