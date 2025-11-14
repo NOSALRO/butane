@@ -31,9 +31,9 @@ def eval_model(model, flow_matching, fpath=None):
 
 if __name__ == "__main__":
 
-    parrser = argparse.ArgumentParser()
-    parsers.add_argument("--eval", action='store_true', default=False, dtype=bool)
-    parsers.add_argument("--fpath", dtype=str)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--eval", action='store_true', default=False)
+    parser.add_argument("--fpath", type=str)
     args = parser.parse_args()
 
     dev = torch.device("cuda")
