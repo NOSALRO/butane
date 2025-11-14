@@ -34,43 +34,53 @@ def kl_div_gaussians(mu1, logvar1, mu2, logvar2) -> torch.Tensor:
     kl_div = 0.5 * (log_det_ratio + k + mahalanobis_distance + trace_term)
     return kl_div
 
-def fgsm(x: torch.Tensor, epsilon: float, clip_range: Optional[List[int]] = None) -> torch.Tensor:
-    # Fast Gradient Sign Method
-    grad = x.grad
-    petrurbated_x = (x + epsilon * grad.sign()).detach()
-    return petrurbated_x.clip(clip_range[0], clip_range[1]) if clip_range is not None else petrurbated_x
+def fgm(
+    x: torch.Tensor,
+    J: Callable,
+    epsilon: float,
+    clip_range: Optional[List[float]] = None,
+    use_sign: bool = False
+) -> torch.Tensor:
+
+    x_prime = x.detach().clone().requires_grad_(True)
+    loss = J(x_prime)
+    grad = torch.autograd.grad(loss, x_prime, retain_graph=False, create_graph=False)[0]
+    with torch.no_grad():
+        if use_sign:
+            perturbed_x = x_prime + epsilon * grad.sign()
+        else:
+            grad_norm = grad.flatten(1).norm(dim=-1)
+            while grad_norm.dim() != grad.dim():
+                grad_norm = grad_norm[..., None]
+            perturbed_x = x_prime + epsilon * grad / (grad_norm + 1e-12)
+        if clip_range is not None:
+            perturbed_x = torch.clamp(perturbed_x, min=clip_range[0], max=clip_range[1])
+    return perturbed_x.detach()
 
 def pgm(
     x: torch.Tensor,
-    model: torch.nn.Module,
-    loss_fn: Callable,
+    J: Callable,
     epsilon: float,
     steps: int = 10,
-    clip_range: Optional[List[int]] = None,
-    model_call: Optional[Callable] = None,
+    clip_range: Optional[List[float]] = None,
+    use_sign: bool = False,
 ) -> torch.Tensor:
-    # Fast Gradient Sign Method
 
-    x_orig = x.detach().clone()
-    alpha = epsilon / (steps / 2) # A common heuristic for step size
-    petrurbated_x = x.detach().clone()
+    alpha = epsilon / steps
+    x_init = x.detach().clone()
+
+    x_prime = x_init.clone()
+    perturbed_x = x_init.clone()
     for _ in range(steps):
-        petrurbated_x.requires_grad = True
-
-        if model_call is not None:
-            output = model_call(model, petrurbated_x)
-        else:
-            output = model(petrurbated_x)
-        model.zero_grad()
-        loss = loss_fn(output)
-        loss.backward()
-
-        with torch.no_grad():
-            grad = petrurbated_x.grad
-            petrurbated_x += alpha * grad.sign()
-            delta = torch.clamp(petrurbated_x - x_orig, min=-epsilon, max=epsilon)
-            petrurbated_x = x_orig + delta
-            if clip_range is not None:
-                petrurbated_x = torch.clip(petrurbated_x, min=clip_range[0], max=clip_range[1])
-        petrurbated_x = petrurbated_x.detach()
-    return petrurbated_x
+        x_prime = fgm(
+            perturbed_x,
+            J=J,
+            epsilon=alpha,
+            clip_range=None,
+            use_sign=use_sign,
+        )
+        delta = (x_prime - x_init).clamp(-epsilon, epsilon)
+        perturbed_x = x_init +  delta
+        if clip_range is not None:
+            perturbed_x = torch.clamp(perturbed_x, min=clip_range[0], max=clip_range[1])
+    return perturbed_x.detach()
