@@ -17,9 +17,10 @@ class TrajectoryDataset(Dataset):
         shift: int = 1,
         loop: bool = False,
         drop_last: bool = False,
+        **kwargs
     ) -> None:
-        super().__init__()
 
+        super().__init__(**kwargs)
         assert (shift > 0), "shift cannot be 0"
 
         self.data = torch.tensor([]) if data is None else data.detach().clone().float()
@@ -30,13 +31,13 @@ class TrajectoryDataset(Dataset):
         self.context = context if context is not None else horizon
         _, self.num_steps, self.feature_dims = self.data.shape
 
-        self._device = torch.device('cpu')
         self.__prepare_data()
+        if not self._on_demand_device_load:
+            self.data = self.data.to(self._device)
+            self.targets = self.targets.to(self._device)
 
         if self._drop_last and self.num_steps < 2 * self.horizon:
             raise ValueError("time series too short for the requested horizon")
-
-
 
     def __len__(self) -> int:
         if not self._drop_last:
@@ -62,15 +63,38 @@ class TrajectoryDataset(Dataset):
 
         seq_current = self.data[traj_index, step_index: end_current]
         seq_future = self.data[traj_index, end_current: end_future]
-        return {"data": seq_current if self._transforms is None else self._transforms(seq_current),
-                "targets": seq_future if self._transforms is None else self._transforms(seq_future)}
+        if self._on_demand_device_load:
+            seq_current = seq_current.to(self._device)
+            seq_future = seq_future.to(self._device)
+        return self._convert_to_tuple({"data": seq_current if self._transforms is None else self._transforms(seq_current),
+                "targets": seq_future if self._transforms is None else self._transforms(seq_future)})
 
     def split(self, percentage: float):
         (split_1_data, _), (split_2_data, _) = self._split(percentage)
         transforms = self._transforms
-        self.__init__(split_1_data, horizon=self.horizon, context=self.context, drop_last=self._drop_last, shift=self.shift, loop=self._loop)
+        self.__init__(
+            data=split_1_data,
+            horizon=self.horizon,
+            context=self.context,
+            drop_last=self._drop_last,
+            shift=self.shift,
+            loop=self._loop,
+            on_demand_device_load=self._on_demand_device_load,
+            device=self._device,
+            return_tuple=self._return_tuple
+        )
         self.set_transforms(transforms)
-        splitted = TrajectoryDataset(split_2_data, horizon=self.horizon, context=self.context, drop_last=self._drop_last, shift=self.shift, loop=self._loop)
+        splitted = TrajectoryDataset(
+            data=split_2_data, 
+            horizon=self.horizon,
+            context=self.context,
+            drop_last=self._drop_last,
+            shift=self.shift,
+            loop=self._loop,
+            on_demand_device_load=self._on_demand_device_load,
+            device=self._device,
+            return_tuple=self._return_tuple
+        )
         splitted.set_transforms(self._transforms)
         return splitted
 
@@ -86,7 +110,6 @@ class TrajectoryDataset(Dataset):
             self.data = torch.cat([self.data, self.data[:, [-1], :].repeat(1, (self.context + self.horizon), 1)], dim=1)
         elif self._drop_last: ...
         else:
-            print(self.data[:, :self.horizon, :])
             if self.horizon * 2 >= self.num_steps:
                 self.data = torch.cat([self.data, self.data[:, :self.horizon, :].repeat(1, 2, 1)], dim=1)
             else:
@@ -118,9 +141,13 @@ class TrajectoryDataset(Dataset):
         step_idx_list_data = batch_arange(step_idx_list, step_idx_list + self.context)
         step_idx_list_targets = batch_arange(step_idx_list + self.context, step_idx_list + (self.context + self.horizon))
 
-        return {
-            "data": self.data[traj_idx_list, step_idx_list_data] if self._transforms is None
-                else self._vectorized_transforms(self.data[traj_idx_list, step_idx_list_data]),
-            "targets": self.data[traj_idx_list, step_idx_list_targets] if self._transforms is None
-                    else self._vectorized_transforms(self.data[traj_idx_list, step_idx_list_targets])
-        }
+        seq_current = self.data[traj_idx_list, step_idx_list_data]
+        seq_future = self.data[traj_idx_list, step_idx_list_targets]
+        if self._on_demand_device_load:
+            seq_current = seq_current.to(self._device)
+            seq_future = seq_future.to(self._device)
+
+        return self._convert_to_tuple({
+            "data": seq_current if self._transforms is None else self._vectorized_transforms(seq_current),
+            "targets": seq_future if self._transforms is None else self._vectorized_transforms(seq_future)
+        })
