@@ -2,7 +2,9 @@ from typing import Optional, Callable, Union, Tuple
 import time
 import functools
 import torch
-from butane.math import *
+# import torchdiffeq
+from ....math import *
+from ...._utils import *
 
 
 class FlowMatching(torch.nn.Module):
@@ -42,41 +44,60 @@ class FlowMatching(torch.nn.Module):
         method: str = 'euler',
         reverse: bool = False,
         return_model_outputs: bool = False,
+        batch_size: int = 128,
     ) -> torch.Tensor:
 
         model.to(self._dummy_param.device)
+        x0 = x0.to(self._dummy_param.device)
+        xs, vs = [], []
+        n_generations = 1
+        n_conditions = x0.size(0)
+
         if condition is not None:
             condition = condition.to(self._dummy_param.device)
 
-        if not multiple_gen_per_condition:
-            x0 = x0.unsqueeze(0)
+        timesteps = torch.linspace(
+            0. if not reverse else 1.,
+            1. if not reverse else 0.,
+            n_timesteps,
+            device=self._dummy_param.device
+        )
 
-        if keep_record:
-            generated_samples = torch.empty(x0.size(0), n_timesteps, *x0.size()[1:])
-            model_outputs = torch.empty(x0.size(0), n_timesteps, *x0.size()[1:])
-        else:
-            generated_samples = torch.empty_like(x0)
-            model_outputs = torch.empty_like(x0)
+        if multiple_gen_per_condition:
+            n_generations, n_conditions = x0.size(0), x0.size(1)
+            x0 = x0.transpose(0, 1).flatten(0, 1)
+            condition = condition.repeat_interleave(n_generations, dim=0)
 
-        if not reverse:
-            timesteps = torch.linspace(0., 1., n_timesteps).to(self._dummy_param.device)
-        else:
-            timesteps = torch.linspace(1., 0., n_timesteps).to(self._dummy_param.device)
+        func = lambda t, x, c: model(x, t.expand(x.size(0), 1), c)
 
-        x0 = x0.to(self._dummy_param.device)
-        func = lambda t, x, c: model(x, t.repeat(x.size(0)).reshape(-1, 1), c)
-
-        for i, _x0 in enumerate(x0):
-            sols, v = odeint(functools.partial(func, c=condition), _x0, timesteps, method, return_model_outputs)
-            sols = sols[None,...] if keep_record else sols[-1][None,...]
-            generated_samples[i] = sols
+        for x0_batch, cond_batch in zip(
+            batching(x0, batch_size, dim=0),
+            batching(condition, batch_size, dim=0),
+        ):
+            x, v = odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method, return_model_outputs)
+            # x = torchdiffeq.odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method='explicit_adams')
+            # v = torch.zeros_like(x)
+            xs.append(x[-1] if not keep_record else x)
             if return_model_outputs:
-                v = v[None,...] if keep_record else v[-1][None,...]
-                model_outputs[i] = v
+                vs.append(v[-1] if not keep_record else v)
+
+        xs = torch.cat(xs, dim=1 if keep_record else 0)
         if return_model_outputs:
-            return generated_samples.squeeze(0), model_outputs.squeeze(0)
-        else:
-            return generated_samples.squeeze(0)
+            vs = torch.cat(vs, dim=1 if keep_record else 0)
+
+        def _revert_shape(x: torch.Tensor):
+           return x.view(
+                n_timesteps if keep_record else 1,
+                n_conditions,
+                n_generations if multiple_gen_per_condition else 1,
+                *x.shape[2:]
+            ).permute(2, 0, 1, *range(3, x.dim() + 1))
+
+        xs = _revert_shape(xs)
+        if return_model_outputs:
+            vs = _revert_shape(vs)
+
+        return (xs, vs) if return_model_outputs else xs
 
     @torch.no_grad()
     def flow_likelihood(
