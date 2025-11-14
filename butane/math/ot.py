@@ -2,10 +2,6 @@ from typing import Union, Optional, Callable, Tuple
 import torch
 import scipy
 
-import matplotlib.pyplot as plt
-import numpy as np
-from torchdyn.datasets import generate_moons
-
 class OTPlanner:
 
     def __init__(
