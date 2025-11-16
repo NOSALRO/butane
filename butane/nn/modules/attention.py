@@ -132,7 +132,6 @@ class _LocalAttentionTemplate(torch.nn.Module):
             x2 = x1
         B1, C1, *spatial1 = x1.shape
         B2, C2, *spatial2 = x2.shape
-        print(spatial1)
 
         if self.N == 1: # When using 1D Attention on images
             x1 = x1.flatten(2)
