@@ -59,7 +59,7 @@ class _AttentionTemplate(torch.nn.Module):
             _qk.masked_fill_(mask == 0, float("-inf"))
 
         if self._causal:
-            causal_mask = torch.tril(torch.ones(_x1_shape[1], _x1_shape[1])).to(x.device)
+            causal_mask = torch.tril(torch.ones(_x1_shape[1], _x1_shape[1])).to(x1.device)
             _qk.masked_fill_(causal_mask == 0, float("-inf"))
 
         _attention_weights = torch.softmax(_qk, dim=-1)
@@ -115,7 +115,7 @@ class _LocalAttentionTemplate(torch.nn.Module):
         if prenorm is not None:
             if module_name(prenorm) == "GroupNorm":
                 self.norm = prenorm(num_channels=self._d_model)
-            elif module_name(norm_type) == "LayerNorm":
+            elif module_name(prenorm) == "LayerNorm":
                 raise ValueError("Cannot use LayerNorm in self-attention")
             else:
                 self.norm = prenorm(self._d_model)
@@ -127,12 +127,14 @@ class _LocalAttentionTemplate(torch.nn.Module):
         mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
 
+        residual_ = x1
         if x2 is None:
             x2 = x1
         B1, C1, *spatial1 = x1.shape
         B2, C2, *spatial2 = x2.shape
+        print(spatial1)
 
-        if self.N == 1:
+        if self.N == 1: # When using 1D Attention on images
             x1 = x1.flatten(2)
             x2 = x2.flatten(2)
 
@@ -140,12 +142,16 @@ class _LocalAttentionTemplate(torch.nn.Module):
         L2 = x2.shape[2:].numel()
 
         if self.norm is not None:
-            x1 = self.norm(x1)
+            q_input = self.norm(x1)
+            kv_input = self.norm(x2)
+        else:
+            q_input = x1
+            kv_input = x2
 
         # conv projections
-        q = self.query(x1)
-        k = self.key(x2)
-        v = self.value(x2)
+        q = self.query(q_input)
+        k = self.key(kv_input)
+        v = self.value(kv_input)
 
         q = q.flatten(2)
         k = k.flatten(2)
@@ -171,7 +177,7 @@ class _LocalAttentionTemplate(torch.nn.Module):
             _attention = _attention.reshape(B1, C1, *spatial1)
         else:
             _attention = self.projection(_attention)
-        out = x1.reshape(B1, C1, *spatial1) + _attention
+        out = residual_ + _attention
         return out
 
 class SelfAttention(_AttentionTemplate):
