@@ -233,48 +233,56 @@ class UNetNd(torch.nn.Module):
         self,
         input_dims: IntParams,
         channels: IntParams = [32, 64],
-        time_embedding_size: int = 32,
         n_residual_blocks: int = 2,
         dropout: float = 0.0,
         attention: bool = False,
-        attention_resolution: IntParams = [],
+        attention_channel_idx: IntParams = [],
         self_condition: bool = False,
         use_film: bool = True,
         use_scale_shift_norm: bool = True,
         n_heads: int = 4,
         n_classes: Optional[int] = None,
         n_middle_blocks: int = 2,
-        condition_input_dims: IntParams = None,
+        condition_input_dims: Optional[IntParams] = None,
         output_channels: Optional[int] = None,
+        resample_with_resblock: bool = False,
+        conv_resample: bool = False,
         zero_conv: bool = True,
         concat_condition: bool = False,
         attention_dropout: float = 0.0,
         scale_residual: bool = False,
+        time_embedding_size: Optional[int] = None,
+        embedding_size: Optional[int] = None,
         embedder: Optional[torch.nn.Module] = None,
-        resample_with_resblock: bool = False,
-        conv_resample: bool = False
     ):
         super().__init__()
         self._input_dims = input_dims
-        self._time_embedding_size = time_embedding_size
         self._channels = channels
-        self._use_film = use_film
         self._dropout = dropout
+        self._output_channels = output_channels if output_channels is not None else self._input_dims[0]
+
+        self._use_film = use_film
         self._use_scale_shift_norm = use_scale_shift_norm
+
         self._self_condition = self_condition
         self._condition_input_dims = condition_input_dims if condition_input_dims is not None else copy.copy(self._input_dims)
         self._concat_condition = concat_condition
-        self._output_channels = output_channels if output_channels is not None else self._input_dims[0]
+
         if self._concat_condition:
             self._input_dims[0] += self._condition_input_dims[0]
+
         if not attention:
-            attention_resolution = []
+            attention_channel_idx = []
         else:
-            if len(attention_resolution) == 0:
-                attention_resolution = list(range(1, len(self._channels) + 1))
-        self._attention_resoluiton = attention_resolution
+            if len(attention_channel_idx) == 0:
+                attention_channel_idx = list(range(1, len(self._channels) + 1))
+
+        self._attention_channel_idx = attention_channel_idx
         self._n_residual_blocks = n_residual_blocks
-        self._embedding_size = self._channels[0] * 4
+
+        self._time_embedding_size = time_embedding_size if time_embedding_size is not None else channels[0] * 4
+        self._embedding_size = embedding_size if embedding_size is not None else self._time_embedding_size
+
         self._resample_with_resblock = resample_with_resblock
 
         embedder = SinusoidalEmbeddings if embedder is None else embedder
@@ -316,7 +324,7 @@ class UNetNd(torch.nn.Module):
                 ))
                 _updated_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_updated_input_dims)
 
-                if (i + 1) in self._attention_resoluiton:
+                if i in self._attention_channel_idx:
                     _subblock.append(self.attention(_updated_input_dims[0]))
 
                 self.downsample_blocks.append(_subblock)
@@ -364,7 +372,7 @@ class UNetNd(torch.nn.Module):
                         use_scale_shift_norm=self._use_scale_shift_norm))
                 _updated_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_updated_input_dims)
 
-                if (i + 1) in self._attention_resoluiton:
+                if i in self._attention_channel_idx:
                     _subblock.append(self.attention(_updated_input_dims[0]))
 
                 if i and j == self._n_residual_blocks:

@@ -1,4 +1,5 @@
 from typing import Optional
+import math
 import torch
 
 from ..._typedefs import *
@@ -19,6 +20,28 @@ class LearnableEmbeddings(torch.nn.Module):
     def embeddings(self) -> torch.Tensor:
         return self._embeddings.weight
 
+class FourierEmbeddings(torch.nn.Module):
+
+    def __init__(self, d_model: int, max_seq_len: Optional[int] = 1000):
+        super().__init__()
+        d_model_half = d_model // 2
+        _omega = torch.exp(
+            -math.log(max_seq_len) * (torch.arange(0, d_model_half, dtype=torch.float32) / d_model_half)
+        )
+        self.register_buffer("_omega", _omega, persistent=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 1:
+            x = x[..., None]
+        seq_len = x.size(1)
+        phase = self._omega[None] * x
+        embeddings = torch.cat([torch.cos(phase), torch.sin(phase)], dim=-1)
+        return embeddings
+
+    @staticmethod
+    def get_embeddings(x: torch.Tensor, d_model: int, max_seq_len: Optional[int] = 1000) -> torch.Tensor:
+        return FourierEmbeddings(d_model, max_seq_len=max_seq_len)(x)
+
 class SinusoidalEmbeddings(torch.nn.Module):
 
     def __init__(self, d_model: int, max_seq_len: Optional[int] = 1000):
@@ -31,17 +54,15 @@ class SinusoidalEmbeddings(torch.nn.Module):
         self.register_buffer("_PE", _pe, persistent=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 1:
+            x = x[..., None]
         seq_len = x.size(1)
         x = x + self._PE[:seq_len, :]
         return x
 
-    @property
-    def embeddings(self) -> torch.Tensor:
-        return self._PE
-
-    @property
-    def dim(self) -> int:
-        return self._PE[0].shape[-1]
+    @staticmethod
+    def get_embeddings(x: torch.Tensor, d_model: int, max_seq_len: Optional[int] = 1000) -> torch.Tensor:
+        return SinusoidalEmbeddings(d_model, max_seq_len=max_seq_len)(x)
 
 class PatchEmbeddings(torch.nn.Module):
 
@@ -49,32 +70,34 @@ class PatchEmbeddings(torch.nn.Module):
         self,
         input_dims: IntParams,
         d_model: int,
-        patch_size: Union[int, IntParams],
+        patch_size: Union[int, IntParams] = 16,
         bias: Optional[bool] = False,
+        normalization: Optional[torch.nn.Module] = None,
     ):
         super().__init__()
-        self.__input_dims = input_dims
+        self._input_dims = input_dims
         self._d_model = d_model
 
-        self._image_size = input_dims[1:]
-
-        if not isinstance(patch_size, (tuple, list)):
-            patch_size = [patch_size, patch_size]
-
         self._patch_size = patch_size
-        self.n_patches = (self._image_size[0] * self._image_size[1]) / (self._patch_size[0] * self._patch_size[1])
+        if not isinstance(patch_size, (tuple, list)):
+            self._patch_size = (patch_size, patch_size)
 
-        self.proj = torch.nn.Conv2d(
-            self.__input_dims[0],
-            self._d_model,
+        if normalization is not None:
+            self.norm = normalization
+
+        self.patchify = torch.nn.Conv2d(
+            in_channels=self._input_dims[0],
+            out_channels=self._d_model,
             kernel_size=self._patch_size,
             stride=self._patch_size,
             bias=bias
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        patches = self.proj(x)
+        patches = self.patchify(x)
         patches = patches.flatten(2).transpose(-1,-2)
+        if hasattr(self, 'norm'):
+            patches = self.norm(patches)
         return patches
 
 
