@@ -5,6 +5,7 @@ import torch
 
 from ..._typedefs import *
 from ..._helpers import _fill_defaults
+from ..utils.utils import zero_module
 
 
 class MLPBlock(torch.nn.Module):
@@ -18,6 +19,7 @@ class MLPBlock(torch.nn.Module):
         output_activation: bool = False,
         bias: BoolParams = [True],
         dropout: Optional[float] = [0.0],
+        zero_out: bool = False,
         *,
         architecture: Optional[Architecture] = None,
     ) -> None:
@@ -49,7 +51,10 @@ class MLPBlock(torch.nn.Module):
         else:
             _architecture = []
             for i in range(len(_hidden_dims) - 1):
-                _architecture.append(torch.nn.Linear(_hidden_dims[i], _hidden_dims[i+1], bias=bias[i]))
+                _linear = torch.nn.Linear(_hidden_dims[i], _hidden_dims[i+1], bias=bias[i])
+                if (i + 1) == (len(_hidden_dims) - 1) and zero_out:
+                    _linear = zero_module(_linear)
+                _architecture.append(_linear)
                 _architecture.append(activation_function[i])
                 if dropout[i] != 0.:
                     _architecture.append(torch.nn.Dropout(dropout[i]))

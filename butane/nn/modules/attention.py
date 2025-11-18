@@ -85,7 +85,7 @@ class _LocalAttentionTemplate(torch.nn.Module):
         dropout_p: Optional[float] = 0.0,
         bias: Optional[bool] = False,
         prenorm: ModuleParams = None,
-        zero_conv: bool = False,
+        zero_out: bool = False,
     ):
         super().__init__()
         assert d_model % n_heads == 0, "Features cannot be devided equally to N heads"
@@ -103,7 +103,7 @@ class _LocalAttentionTemplate(torch.nn.Module):
         self.value = self.conv(self._d_model, self._d_model, kernel_size, padding=_padding, bias=bias)
         self.projection = (
             utils.zero_module(self.conv(self._d_model, self._d_model, 1, bias=bias))
-            if zero_conv
+            if zero_out
             else self.conv(self._d_model, self._d_model, 1, bias=bias)
         )
         # fmt: on
