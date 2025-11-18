@@ -22,13 +22,18 @@ class LearnableEmbeddings(torch.nn.Module):
 
 class FourierEmbeddings(torch.nn.Module):
 
-    def __init__(self, d_model: int, max_seq_len: Optional[int] = 1000):
+    def __init__(
+        self,
+        d_model: int,
+        max_seq_len: Optional[int] = 1000,
+        learnable: bool = False
+    ) -> None:
         super().__init__()
         d_model_half = d_model // 2
         _omega = torch.exp(
             -math.log(max_seq_len) * (torch.arange(0, d_model_half, dtype=torch.float32) / d_model_half)
         )
-        self.register_buffer("_omega", _omega, persistent=False)
+        self._omega = torch.nn.Parameter(_omega, requires_grad=learnable)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() == 1:
@@ -44,14 +49,19 @@ class FourierEmbeddings(torch.nn.Module):
 
 class SinusoidalEmbeddings(torch.nn.Module):
 
-    def __init__(self, d_model: int, max_seq_len: Optional[int] = 1000):
+    def __init__(
+        self,
+        d_model: int,
+        max_seq_len: Optional[int] = 1000,
+        learnable: bool = False
+    ) -> None :
         super().__init__()
         _pe = torch.zeros((max_seq_len, d_model))
         pos = torch.arange(max_seq_len).unsqueeze(1)
         div_term = torch.pow(10000, torch.arange(0, d_model, 2) / d_model)
         _pe[:, 0::2] = torch.sin(pos/div_term)
         _pe[:, 1::2] = torch.cos(pos/div_term)
-        self.register_buffer("_PE", _pe, persistent=False)
+        self._PE = torch.nn.Parameter(_pe, requires_grad=learnable)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() == 1:
