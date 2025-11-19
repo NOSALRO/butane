@@ -207,7 +207,7 @@ class ResBlock3d(ResBlockNd):
     upsample_block = Upsample3d
     downsample_block = Downsample3d
 
-class SelfConditionNd(torch.nn.Module):
+class ConditionProjectionBlockNd(torch.nn.Module):
     conv: torch.nn.Module
     residual_block_creator: XDependent
 
@@ -266,19 +266,21 @@ class SelfConditionNd(torch.nn.Module):
         h = self.linear_projection(h)
         return h
 
-class SelfCondition1d(SelfConditionNd):
+class ConditionProjectionBlock1d(ConditionProjectionBlockNd):
     conv = torch.nn.Conv1d
     residual_block_creator = ResBlock1d
 
-class SelfCondition2d(SelfConditionNd):
+class ConditionProjectionBlock2d(ConditionProjectionBlockNd):
     conv = torch.nn.Conv2d
     residual_block_creator = ResBlock2d
 
-class SelfCondition3d(SelfConditionNd):
+class ConditionProjectionBlock3d(ConditionProjectionBlockNd):
     conv = torch.nn.Conv3d
     residual_block_creator = ResBlock3d
 
 
+# TOOD: Fix input size handling
+# The model does not handle odd input size; only 2^n
 class UNetNd(torch.nn.Module):
     conv: torch.nn.Module
     conv_block: torch.nn.Module
@@ -304,10 +306,11 @@ class UNetNd(torch.nn.Module):
         n_heads: int = 4,
         n_middle_blocks: int = 2,
         resample_with_resblock: bool = False,
-        conv_resample: bool = False,
+        conv_resample: bool = True,
         zero_conv: bool = True,
         attention_dropout: float = 0.0,
         scale_residual: bool = False,
+        time_dependent: bool = True,
         time_embedding_size: Optional[int] = None,
         embedding_size: Optional[int] = None,
         embedder: Optional[torch.nn.Module] = None,
@@ -328,6 +331,7 @@ class UNetNd(torch.nn.Module):
 
         self._use_film = use_film
         self._has_condition = project_condition or concat_condition or (n_classes is not None)
+        self._time_dependent = time_dependent
         self._n_classes = n_classes
 
         self._condition_input_dims = condition_input_dims if condition_input_dims is not None else copy.copy(self._input_dims)
@@ -356,19 +360,19 @@ class UNetNd(torch.nn.Module):
             zero_out=zero_conv,
         )
 
-        if time_embedding_size is not None:
-            self._time_embedding_size = time_embedding_size if time_embedding_size is not None else channels[0] * 4
-            self._embedding_size = embedding_size if embedding_size is not None else self._time_embedding_size
+        if self._time_dependent:
+            self._time_embedding_size = time_embedding_size if time_embedding_size is not None else channels[0]
+            self._embedding_size = embedding_size if embedding_size is not None else self._time_embedding_size * 4
 
-            embedder = FourierEmbeddings if embedder is None else embedder
-            self.time_embedder = embedder(d_model=self._time_embedding_size, learnable=learn_embeddings)
+            # embedder = FourierEmbeddings if embedder is None else embedder
+            # self.time_embedder = embedder(d_model=self._time_embedding_size, learnable=learn_embeddings)
 
             self.embedding_projection = MLPBlock(
                     input_dims=self._time_embedding_size,
                     output_dims=self._embedding_size,
                     hidden_dims=[self._embedding_size],
                     activation_function=[torch.nn.SiLU()],
-                    output_activation=True,
+                    output_activation=False,
             )
         else:
             self._time_embedding_size = None
@@ -410,20 +414,20 @@ class UNetNd(torch.nn.Module):
 
                 self.downsample_blocks.append(_subblock)
                 _downsampling_channels.append(int(_updated_input_dims[0]))
-                if (i + 1) != len(self._channels):
-                    self.downsample_blocks.append(
-                        XDependentSequential(self.residual_block_creator(
-                            input_dims=_updated_input_dims,
-                            embedding_size=self._embedding_size,
-                            dropout=self._dropout,
-                            output_channels=ch,
-                            use_film=self._use_film,
-                            downsample=True,
-                        ) if self._resample_with_resblock
-                        else self.downsample(_updated_input_dims, use_conv=conv_resample, output_channels=ch)
-                    ))
-                    _updated_input_dims = utils.calculate_output_size(self.downsample_blocks[-1][-1], input_dims=_updated_input_dims)
-                    _downsampling_channels.append(int(_updated_input_dims[0]))
+            if (i + 1) != len(self._channels):
+                self.downsample_blocks.append(
+                    XDependentSequential(self.residual_block_creator(
+                        input_dims=_updated_input_dims,
+                        embedding_size=self._embedding_size,
+                        dropout=self._dropout,
+                        output_channels=ch,
+                        use_film=self._use_film,
+                        downsample=True,
+                    ) if self._resample_with_resblock
+                    else self.downsample(_updated_input_dims, use_conv=conv_resample, output_channels=ch)
+                ))
+                _updated_input_dims = utils.calculate_output_size(self.downsample_blocks[-1][-1], input_dims=_updated_input_dims)
+                _downsampling_channels.append(int(_updated_input_dims[0]))
 
         self.middle_blocks = torch.nn.ModuleList()
         for i in range(n_middle_blocks):
@@ -485,7 +489,7 @@ class UNetNd(torch.nn.Module):
 
         emb = None
         if t is not None:
-            assert self._time_embedding_size is not None, "Time dependency is not enabled, but time was provided"
+            assert self._time_dependent, "Time dependency is not enabled, but time was provided"
             emb = self.time_embedder(t)
             emb = self.embedding_projection(emb)
 
@@ -531,7 +535,8 @@ class UNetNd(torch.nn.Module):
             h = mb(h, emb)
 
         for up in self.upsample_blocks:
-            h = torch.cat([h, _skip_connection.pop()], dim=1)
+            _skip = _skip_connection.pop()
+            h = torch.cat([h, _skip], dim=1)
             h = up(h, emb)
 
         return self.output_block(h)
@@ -546,7 +551,7 @@ class UNet1d(UNetNd):
     downsample = Downsample1d
     upsample = Upsample1d
     attention_block = LocalSelfAttention1d
-    condition_block = SelfCondition1d
+    condition_block = ConditionProjectionBlock1d
     dims = 1
 
 class UNet2d(UNetNd):
@@ -558,7 +563,7 @@ class UNet2d(UNetNd):
     downsample = Downsample2d
     upsample = Upsample2d
     attention_block = LocalSelfAttention1d
-    condition_block = SelfCondition2d
+    condition_block = ConditionProjectionBlock2d
     dims = 2
 
 class UNet3d(UNetNd):
@@ -570,5 +575,5 @@ class UNet3d(UNetNd):
     downsample = Downsample3d
     upsample = Upsample3d
     attention_block = LocalSelfAttention2d
-    condition_block = SelfCondition3d
+    condition_block = ConditionProjectionBlock3d
     dims = 3
