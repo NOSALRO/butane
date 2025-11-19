@@ -26,7 +26,7 @@ class DiTBlock(torch.nn.Module):
         input_dims: int,
         output_ratio: float,
         embedding_size: Optional[int] = None,
-        num_heads: int = 1,
+        num_heads: int = 8,
     ) -> None:
 
         super().__init__()
@@ -36,7 +36,7 @@ class DiTBlock(torch.nn.Module):
 
         self.norm_1 = torch.nn.LayerNorm(self._input_dims, elementwise_affine=False)
         self.norm_2 = torch.nn.LayerNorm(self._input_dims, elementwise_affine=False)
-        self.attn = SelfAttention(self._input_dims)
+        self.attn = SelfAttention(self._input_dims, n_heads=num_heads)
         self.mlp = MLPBlock(
             input_dims=self._input_dims,
             output_dims=self._input_dims,
