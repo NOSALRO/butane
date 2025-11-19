@@ -364,8 +364,8 @@ class UNetNd(torch.nn.Module):
             self._time_embedding_size = time_embedding_size if time_embedding_size is not None else channels[0]
             self._embedding_size = embedding_size if embedding_size is not None else self._time_embedding_size * 4
 
-            # embedder = FourierEmbeddings if embedder is None else embedder
-            # self.time_embedder = embedder(d_model=self._time_embedding_size, learnable=learn_embeddings)
+            embedder = FourierEmbeddings if embedder is None else embedder
+            self.time_embedder = embedder(d_model=self._time_embedding_size, learnable=learn_embeddings)
 
             self.embedding_projection = MLPBlock(
                     input_dims=self._time_embedding_size,
