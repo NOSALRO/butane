@@ -1,6 +1,6 @@
 from typing import Callable, Optional, Union, Tuple
 from abc import abstractmethod
-from functools import partial
+from functools import partial, reduce
 import copy
 import math
 import torch
@@ -16,7 +16,14 @@ from ..modules.attention import (
     LocalCrossAttention1d,
     LocalCrossAttention2d
 )
-from ..modules.embeddings import SinusoidalEmbeddings, LearnableEmbeddings, PatchEmbeddings, FourierEmbeddings
+from ..modules.embeddings import (
+    SinusoidalEmbeddings,
+    LearnableEmbeddings,
+    PatchEmbeddingsNd,
+    PatchEmbeddings1d,
+    PatchEmbeddings2d,
+    FourierEmbeddings,
+)
 from ..utils import utils
 
 
@@ -106,7 +113,7 @@ class FinalBlock(torch.nn.Module):
         self._embedding_size = embedding_size if embedding_size is not None else input_dims
 
         self.norm = torch.nn.LayerNorm(self._input_dims, elementwise_affine=False)
-        self.fc1 = utils.zero_module(torch.nn.Linear(self._input_dims, patch_size * patch_size * output_channels))
+        self.fc1 = utils.zero_module(torch.nn.Linear(self._input_dims, reduce(lambda x, y: x*y, patch_size) * output_channels))
         self.film = torch.nn.Sequential(
             torch.nn.SiLU(),
             utils.zero_module(torch.nn.Linear(self._embedding_size, 2 * self._input_dims))
@@ -122,7 +129,10 @@ class FinalBlock(torch.nn.Module):
         x = self.fc1(x)
         return x
 
-class DiT(torch.nn.Module):
+# TODO: Add Multimodal conditioning option.
+class DiTNd(torch.nn.Module):
+    patch_embedder: PatchEmbeddingsNd
+    N: int
 
     def __init__(
         self,
@@ -163,6 +173,12 @@ class DiT(torch.nn.Module):
             "Multiple types of conditioning were selected, but only one type should be"
         )
 
+        if not isinstance(self._patch_size, (tuple, list)):
+            self._patch_size = tuple([self._patch_size for _ in range(len(self._input_dims) - 1)])
+        if not isinstance(self._condition_patch_size, (tuple, list)):
+            self._condition_patch_size = tuple([self._condition_patch_size for _ in range(len(self._condition_input_dims) - 1)])
+
+
         self._n_classes = n_classes
         self._has_condition = self._in_context_condition or self._additive_condition or self._cross_attention_condition or (self._n_classes is not None)
 
@@ -178,23 +194,19 @@ class DiT(torch.nn.Module):
                 bias=[True]
         )
 
-        assert not ((self._input_dims[1] % self._patch_size) or (self._input_dims[2] % self._patch_size)), (
-            "Input dimensions are not divisable by the patch size!"
-        )
+        # assert not ((self._input_dims[1] % self._patch_size) or (self._input_dims[2] % self._patch_size)), (
+        #     "Input dimensions are not divisable by the patch size!"
+        # )
 
-        self._grid_h = self._input_dims[1] // self._patch_size
-        self._grid_w = self._input_dims[2] // self._patch_size
-        self._num_of_patches = self._grid_h * self._grid_w
-
-        self._2d_embeddings = torch.nn.Parameter(
-            self._get_2d_positional_embeddings(
+        self._input_embeddings = torch.nn.Parameter(
+            self._get_positional_embeddings(
                 d_model=self._hidden_dims,
-                H=self._grid_h,
-                W=self._grid_w
+                input_dims=self._input_dims,
+                patch_size=self._patch_size
             ).float().unsqueeze(0),
             requires_grad=learnable_input_embeddings,
         )
-        self.patchify = PatchEmbeddings(
+        self.patchify = self.patch_embedder(
             self._input_dims,
             patch_size=self._patch_size,
             d_model=self._hidden_dims,
@@ -205,22 +217,20 @@ class DiT(torch.nn.Module):
         if self._has_condition and self._n_classes is not None:
             self.class_embedder = torch.nn.Embedding(self._n_classes, self._hidden_dims)
         else:
-            assert not ((self._condition_input_dims[1] % self._condition_patch_size) or (self._condition_input_dims[2] % self._condition_patch_size)), (
-                "Condition dimensions are not divisable by the patch size!"
-            )
-            self._condition_grid_h = self._condition_input_dims[1] // self._condition_patch_size
-            self._condition_grid_w = self._condition_input_dims[2] // self._condition_patch_size
-            self._num_of_condition_patches = self._condition_grid_h * self._condition_grid_w
-            self._2d_embeddings_condition = torch.nn.Parameter(
-                self._get_2d_positional_embeddings(
+            # assert not ((self._condition_input_dims[1] % self._condition_patch_size) or (self._condition_input_dims[2] % self._condition_patch_size)), (
+            #     "Condition dimensions are not divisable by the patch size!"
+            # )
+
+            self._condition_embeddings = torch.nn.Parameter(
+                self._get_positional_embeddings(
                     d_model=self._hidden_dims,
-                    H=self._condition_grid_h,
-                    W=self._condition_grid_w,
+                    input_dims=self._condition_input_dims,
+                    patch_size=self._condition_patch_size,
                 ).float().unsqueeze(0),
                 requires_grad=learnable_condition_embeddings,
             )
 
-            self.patchify_condition = PatchEmbeddings(
+            self.patchify_condition = self.patch_embedder(
                 self._condition_input_dims,
                 patch_size=self._condition_patch_size,
                 d_model=self._hidden_dims,
@@ -253,16 +263,16 @@ class DiT(torch.nn.Module):
 
         if self._n_classes is None:
             if self._in_context_condition:
-                c = self.patchify_condition(c) + self._2d_embeddings_condition
+                c = self.patchify_condition(c) + self._condition_embeddings
                 x = torch.cat([x, c], dim=1)
             elif self._additive_condition:
                 assert self._num_of_patches == self._num_of_condition_patches, (
                     "Additive conditioning requires main input and condition to have the same number of patches."
                 )
-                c = self.patchify_condition(c) + self._2d_embeddings_condition
+                c = self.patchify_condition(c) + self._condition_embeddings
                 x = x + c
             elif self._cross_attention_condition:
-                c = self.patchify_condition(c) + self._2d_embeddings_condition
+                c = self.patchify_condition(c) + self._condition_embeddings
         else:
             emb = self.class_embedder(c) + emb
 
@@ -276,7 +286,7 @@ class DiT(torch.nn.Module):
         c: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
 
-        x = self.patchify(x) + self._2d_embeddings
+        x = self.patchify(x) + self._input_embeddings
         x_n_patches = x.size(1)
 
         x, emb, c = self.prepare_condition(x, t, c)
@@ -290,6 +300,14 @@ class DiT(torch.nn.Module):
         x = self.output_layer(x, emb)
         x = self._reshape(x)
         return x
+
+    def _get_positional_embeddings(self, d_model: int, input_dims: IntParams, patch_size: int) -> torch.Tensor:
+        if self.N == 2:
+            W = input_dims[1] // patch_size[0]
+            H = input_dims[2] // patch_size[1]
+            return self._get_2d_positional_embeddings(d_model, W=W, H=H)
+        elif self.N == 1:
+            return FourierEmbeddings.get_embeddings(torch.arange(0, input_dims[-1]//patch_size[0]), d_model)
 
     def _get_2d_positional_embeddings(self, d_model: int, W: int, H: int) -> torch.Tensor:
         xx = torch.arange(0, W)
@@ -316,8 +334,20 @@ class DiT(torch.nn.Module):
         )
 
     def _reshape(self, x: torch.Tensor) -> torch.Tensor:
-        # H = W = int(math.sqrt(x.size(1)))
-        x = x.view(x.size(0), self._grid_h, self._grid_w, self._patch_size, self._patch_size, self._output_channels)
-        x = torch.einsum('nhwpqc->nchpwq', x)
-        x = x.reshape(x.size(0), self._output_channels, self._patch_size * self._grid_h, self._patch_size * self._grid_w)
+        n_patches_per_dim = [d // p for d, p in zip(self._input_dims[1:], self._patch_size)]
+        x = x.view(x.size(0), *n_patches_per_dim, *self._patch_size, self._output_channels)
+        if self.N == 1:
+            x = torch.einsum('nspc->ncsp', x)
+        elif self.N == 2:
+            x = torch.einsum('nhwpqc->nchpwq', x)
+        x = x.reshape(x.size(0), self._output_channels, *[d * p for d, p in zip(n_patches_per_dim, self._patch_size)])
+        # x = x.reshape(x.size(0), self._output_channels, *self._input_dims[1:])
         return x
+
+class DiT1d(DiTNd):
+    patch_embedder = PatchEmbeddings1d
+    N = 1
+
+class DiT2d(DiTNd):
+    patch_embedder = PatchEmbeddings2d
+    N = 2

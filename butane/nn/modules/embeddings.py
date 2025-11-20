@@ -74,7 +74,8 @@ class SinusoidalEmbeddings(torch.nn.Module):
     def get_embeddings(x: torch.Tensor, d_model: int, max_seq_len: Optional[int] = 1000) -> torch.Tensor:
         return SinusoidalEmbeddings(d_model, max_seq_len=max_seq_len)(x)
 
-class PatchEmbeddings(torch.nn.Module):
+class PatchEmbeddingsNd(torch.nn.Module):
+    conv: torch.nn.Module
 
     def __init__(
         self,
@@ -86,16 +87,18 @@ class PatchEmbeddings(torch.nn.Module):
     ):
         super().__init__()
         self._input_dims = input_dims
+        n_dims = len(self._input_dims) - 1 # remove channel dim
         self._d_model = d_model
 
+        # TODO: If 3D, add option to use patch_size (1, patch_size, patch_size)
         self._patch_size = patch_size
         if not isinstance(patch_size, (tuple, list)):
-            self._patch_size = (patch_size, patch_size)
+            self._patch_size = tuple([patch_size for _ in range(n_dims)])
 
         if normalization is not None:
             self.norm = normalization
 
-        self.patchify = torch.nn.Conv2d(
+        self.patchify = self.conv(
             in_channels=self._input_dims[0],
             out_channels=self._d_model,
             kernel_size=self._patch_size,
@@ -110,6 +113,14 @@ class PatchEmbeddings(torch.nn.Module):
             patches = self.norm(patches)
         return patches
 
+class PatchEmbeddings1d(PatchEmbeddingsNd):
+    conv = torch.nn.Conv1d
+
+class PatchEmbeddings2d(PatchEmbeddingsNd):
+    conv = torch.nn.Conv2d
+
+class PatchEmbeddings3d(PatchEmbeddingsNd):
+    conv = torch.nn.Conv3d
 
 class RelativePositionEmbeddings(torch.nn.Module):
 
