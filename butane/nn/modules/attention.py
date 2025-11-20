@@ -11,6 +11,7 @@ class _AttentionTemplate(torch.nn.Module):
         self,
         d_model: int,
         *,
+        return_attention: bool = False,
         n_heads: Optional[int] = 1,
         dropout_p: Optional[float] = 0.0,
         causal: Optional[bool] = False,
@@ -22,6 +23,7 @@ class _AttentionTemplate(torch.nn.Module):
         self._n_heads = n_heads
         self.d_k = self._d_model // self._n_heads
         self._causal = causal
+        self._return_attention = return_attention
 
         self.scale_factor = torch.sqrt(torch.tensor(self.d_k, dtype=torch.float32))
 
@@ -69,6 +71,8 @@ class _AttentionTemplate(torch.nn.Module):
         if self._n_heads > 1:
             _attention = _attention.transpose(1, 2).reshape(*_x1_shape, self._d_model)
 
+        if self._return_attention:
+            return self.linear_projection(_attention.contiguous())
         return x1 + self.linear_projection(_attention.contiguous())
 
 class _LocalAttentionTemplate(torch.nn.Module):
@@ -86,6 +90,7 @@ class _LocalAttentionTemplate(torch.nn.Module):
         bias: Optional[bool] = False,
         prenorm: ModuleParams = None,
         zero_out: bool = False,
+        return_attention: bool = False,
     ):
         super().__init__()
         assert d_model % n_heads == 0, "Features cannot be devided equally to N heads"
@@ -93,6 +98,7 @@ class _LocalAttentionTemplate(torch.nn.Module):
         self._d_model = d_model
         self._n_heads = n_heads
         self.d_k = int(self._d_model) // self._n_heads
+        self._return_attention = return_attention
         _padding = kernel_size // 2
 
         self.scale_factor = torch.sqrt(torch.tensor(self.d_k, dtype=torch.float32))
@@ -176,8 +182,9 @@ class _LocalAttentionTemplate(torch.nn.Module):
             _attention = _attention.reshape(B1, C1, *spatial1)
         else:
             _attention = self.projection(_attention)
-        out = residual_ + _attention
-        return out
+        if self._return_attention:
+            return _attention
+        return residual_ + _attention
 
 class SelfAttention(_AttentionTemplate):
     def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None):
