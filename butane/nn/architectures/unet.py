@@ -278,6 +278,41 @@ class ConditionProjectionBlock3d(ConditionProjectionBlockNd):
     conv = torch.nn.Conv3d
     residual_block_creator = ResBlock3d
 
+class ConvAdapterNd(torch.nn.Module):
+    conv: torch.nn.Module
+    N: int
+
+    def __init__(
+        self,
+        input_dims: IntParams,
+        channels: IntParams,
+    ) -> None:
+
+        super().__init__()
+        self._input_dims = input_dims
+        self._channels = channels
+        self._channels.insert(0, self._input_dims[0])
+
+        self.adapters = torch.nn.ModuleList()
+        for i in range(len(self._channels) - 1):
+            adapter = torch.nn.Sequential(
+                self.conv(self._channels[i], self._channels[i+1], 3, padding=1),
+                torch.nn.SiLU(),
+                self.conv(self._channels[i+1], self._channels[i+1], 1, padding=0)
+            )
+            self.adapters.append(adapter)
+
+class ConvAdapter1d(ConvAdapterNd):
+    conv = torch.nn.Conv1d
+    N: 1
+
+class ConvAdapter2d(ConvAdapterNd):
+    conv = torch.nn.Conv2d
+    N: 2
+
+class ConvAdapter3d(ConvAdapterNd):
+    conv = torch.nn.Conv3d
+    N: 3
 
 # TOOD: Fix input size handling
 # The model does not handle odd input size; only 2^n
@@ -388,12 +423,12 @@ class UNetNd(torch.nn.Module):
                 attention=self.attention if condition_attention else None,
             )
         elif self._n_classes is not None:
-            if self._n_classes is not None:
-                self.class_embedder = torch.nn.Embedding(self._n_classes, self._embedding_size)
+            self.class_embedder = torch.nn.Embedding(self._n_classes, self._embedding_size)
 
         self.input_layer = self.conv(self._input_dims[0], self._channels[0], 3, padding=1)
         _updated_input_dims = utils.calculate_output_size(self.input_layer, input_dims=self._input_dims)
         _downsampling_channels = [self._channels[0]]
+        self._resampled = []
 
         self.downsample_blocks = torch.nn.ModuleList([])
         for i, ch in enumerate(self._channels):
@@ -414,6 +449,7 @@ class UNetNd(torch.nn.Module):
 
                 self.downsample_blocks.append(_subblock)
                 _downsampling_channels.append(int(_updated_input_dims[0]))
+                self._resampled.append(False)
             if (i + 1) != len(self._channels):
                 self.downsample_blocks.append(
                     XDependentSequential(self.residual_block_creator(
@@ -426,6 +462,7 @@ class UNetNd(torch.nn.Module):
                     ) if self._resample_with_resblock
                     else self.downsample(_updated_input_dims, use_conv=conv_resample, output_channels=ch)
                 ))
+                self._resampled.append(True)
                 _updated_input_dims = utils.calculate_output_size(self.downsample_blocks[-1][-1], input_dims=_updated_input_dims)
                 _downsampling_channels.append(int(_updated_input_dims[0]))
 
@@ -479,6 +516,7 @@ class UNetNd(torch.nn.Module):
             torch.nn.SiLU(),
             utils.zero_module(self.conv(_updated_input_dims[0], self._output_channels, 3, padding=1))
         )
+        # self.adapter = ConvAdapter2d(self._condition_input_dims, [32, *self._channels])
 
     def prepare_conditioning(
         self,
@@ -526,9 +564,21 @@ class UNetNd(torch.nn.Module):
         x, emb, c = self.prepare_conditioning(x, t, c)
         h = self.input_layer(x)
 
+        # f = []
+        # for a in self.adapter.adapters:
+        #     c = a(c)
+        #     f.append(c)
+
+        # stage = 1
+        # _skip_connection = [h + f[0]]
         _skip_connection = [h]
-        for down in self.downsample_blocks:
+        for i, down in enumerate(self.downsample_blocks):
             h = down(h, emb)
+            # if self._resampled[i]:
+            #     r = f[stage]
+            #     r = torch.nn.functional.interpolate(r, size=h.shape[2:])
+            #     h = h + r
+            #     stage+=1
             _skip_connection.append(h)
 
         for mb in self.middle_blocks:
