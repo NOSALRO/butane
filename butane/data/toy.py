@@ -55,3 +55,24 @@ def make_moons(n_samples: int = 10_000, noise_coef: float = 0.05) -> torch.Tenso
     labels = labels[shuffled_indices]
     moons = moons + noise_coef * torch.randn_like(moons)
     return moons, labels
+
+def make_pinwheel(n_samples=2000, n_classes=5, noise=0.1):
+    points_per_class = n_samples // n_classes
+    data = []
+    labels = []
+    for k in range(n_classes):
+        r = torch.linspace(0.1, 1.0, points_per_class)
+        theta = torch.linspace(0, 2.5, points_per_class) + (k * 2 * np.pi / n_classes)
+        x = (r + torch.randn(points_per_class) * noise) * torch.cos(theta)
+        y = (r + torch.randn(points_per_class) * noise) * torch.sin(theta)
+        data.append(torch.stack([x, y], dim=1))
+        labels.append(torch.full((points_per_class,), k))
+    return torch.cat(data), torch.cat(labels)
+
+def make_ring(n_samples=2000, r_min=0.3, r_max=0.6):
+    theta = torch.rand(n_samples) * 2 * np.pi
+    r = torch.rand(n_samples) * (r_max - r_min) + r_min
+    x = r * torch.cos(theta)
+    y = r * torch.sin(theta)
+    return torch.stack([x, y], dim=1)
+
