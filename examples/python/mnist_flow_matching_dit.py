@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 @torch.no_grad()
 def eval_model(model, flow_matching, fpath=None):
     x0 = flow_matching.source_distribution().sample((10,))
-    test_cond = (torch.jit.load("data/mnist_data.pt").state_dict()["0"] * 2) - 1
+    test_cond = (torch.load('data/mnist/mnist_train_data.pt') * 2) - 1
     generations = flow_matching.flow(
         model=model,
         x0=x0,
@@ -39,8 +39,8 @@ if __name__ == "__main__":
     dev = torch.device("cuda")
 
     ds = butane.data.Dataset(
-        (torch.jit.load("data/mnist_data.pt").state_dict()["0"] * 2) - 1,
-        torch.jit.load("data/mnist_targets.pt").state_dict()["0"],
+        (torch.load('data/mnist/mnist_train_data.pt') * 2) - 1,
+        torch.load("data/mnist_train_targets.pt"),
         on_demand_device_load=True,
         device='cpu'
     )
@@ -54,10 +54,12 @@ if __name__ == "__main__":
 
     model = butane.nn.DiT(
         [1, 28, 28],
-        depth=5,
-        hidden_dims=1152,
+        depth=12,
+        hidden_dims=384,
         patch_size=4
     ).to(dev)
+    print(torch.nn.utils.parameters_to_vector(model.parameters()).size())
+    exit()
 
     fm = butane.nn.ConditionalFlowMatching(0.02).to(dev)
     fm.set_source_distribution(torch.distributions.Independent(torch.distributions.Normal(torch.zeros(1, 28, 28), torch.ones(1, 28, 28)), 3))

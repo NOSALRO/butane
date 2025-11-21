@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 @torch.no_grad()
 def eval_model(model, flow_matching, fpath=None):
     x0 = flow_matching.source_distribution().sample((10,))
-    test_cond = (torch.jit.load("data/mnist_data.pt").state_dict()["0"] * 2) - 1
+    test_cond = (torch.load('data/mnist/mnist_train_data.pt') * 2) - 1
     generations = flow_matching.flow(
         model=model,
         x0=x0,
@@ -39,8 +39,8 @@ if __name__ == "__main__":
     dev = torch.device("cuda")
 
     ds = butane.data.Dataset(
-        (torch.jit.load("data/mnist_data.pt").state_dict()["0"] * 2) - 1,
-        torch.jit.load("data/mnist_targets.pt").state_dict()["0"],
+        (torch.load('data/mnist/mnist_train_data.pt') * 2) - 1,
+        torch.load("data/mnist_train_targets.pt"),
         on_demand_device_load=True,
         device='cpu'
     )
@@ -53,17 +53,34 @@ if __name__ == "__main__":
     class_conditioned = False
 
     model = butane.nn.UNet2d(
-        [1, 28, 28],
-        channels=[32, 64, 128],
-        self_condition=True,
-        attention_resolution=[3],
-        attention=True,
+        input_dims=[1,28,28],
+        channels=[64, 128],
+        n_residual_blocks=2,
+        output_channels=1,
+        dropout=0.0,
+        attention=False,
+        attention_channel_idx=[2],
         use_film=True,
+        n_heads=4,
+        n_middle_blocks=2,
+        resample_with_resblock=False,
+        conv_resample=True,
+        zero_conv=True,
+        attention_dropout=0.0,
+        time_dependent=True,
+        time_embedding_size=None,
+        embedding_size=None,
+        embedder=None,
+        learn_embeddings=False,
         n_classes=None,
-        use_scale_shift_norm=True,
-        scale_residual=False,
-        n_residual_blocks=4,
+        concat_condition=True,
+        project_condition=False,
+        condition_input_dims=None,
+        condition_dropout=0.,
+        condition_n_residuals=1,
+        condition_attention=True,
     ).to(dev)
+    # print(torch.nn.utils.parameters_to_vector(model.parameters()).size())
 
     fm = butane.nn.ConditionalFlowMatching(0.02).to(dev)
     fm.set_source_distribution(torch.distributions.Independent(torch.distributions.Normal(torch.zeros(1, 28, 28), torch.ones(1, 28, 28)), 3))

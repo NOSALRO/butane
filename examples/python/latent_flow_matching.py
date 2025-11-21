@@ -31,7 +31,7 @@ class TimeDependentModel(torch.nn.Module):
 
 if __name__ == "__main__":
     dev = torch.device('cuda')
-    ds = butane.data.Dataset(torch.jit.load("data/mnist_data.pt").state_dict()['0'])
+    ds = butane.data.Dataset(torch.load('data/mnist/mnist_train_data.pt'))
     ds.to(dev)
     butane.data.ops.drop_to_max_size(ds, 8000)
     dl = torch.utils.data.DataLoader(ds, batch_size=64, shuffle=True)

@@ -24,7 +24,7 @@ def eval_model(model, diffusion, fpath=None):
 
 if __name__ == "__main__":
     dev = torch.device("cuda")
-    ds = butane.data.Dataset(torch.jit.load("data/mnist_data.pt").state_dict()["0"])
+    ds = butane.data.Dataset(torch.load('data/mnist/mnist_train_data.pt'))
     ds.data = (ds.data * 2)  - 1.
     ds.to(dev)
     butane.data.ops.drop_to_max_size(ds, 5000)
