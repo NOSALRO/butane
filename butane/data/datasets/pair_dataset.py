@@ -59,23 +59,17 @@ class PairDataset(Dataset):
             self._target_loc = self._target_loc.to(device)
             self._target_map = self._target_map.to(device)
             self._col_idx = self._col_idx.to(device)
+            self.anchor_row_idx = torch.searchsorted(unique_targets_pair, self.targets.view(-1))
 
             # TODO: Clean data from the pair dataset side
 
+    # TODO: Optimize
     def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
 
-        if isinstance(idx, slice):
-            start, stop, step = idx.indices(len(self))
-            idx = torch.arange(start, stop, step)
-
-        if isinstance(idx, (list, int)):
-            idx = torch.tensor([idx])
-
         if self._has_targets() and self._has_targets_pair():
-            _targets = self.targets[idx].view(-1)
-            row_indices = torch.searchsorted(self._target_loc, _targets)
+            row_indices = self.anchor_row_idx[idx]
             limits = self._col_idx[row_indices]
-            random_cols = (torch.rand(len(limits), device=self._device) * limits).long()
+            random_cols = (torch.rand(limits.numel(), device=self._device) * limits).long()
             pair_idx = self._target_map[row_indices, random_cols]
         else:
             pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx), ), device=self._device)
