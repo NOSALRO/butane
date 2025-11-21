@@ -56,6 +56,9 @@ class PairDataset(Dataset):
                 self._target_map[i] = torch.nn.functional.pad(pair, (0, max_num_of_instances - pair.numel()), value=-1, mode='constant')
 
             self._col_idx = (self._target_map != -1).sum(dim=1)
+            self._target_loc = self._target_loc.to(device)
+            self._target_map = self._target_map.to(device)
+            self._col_idx = self._col_idx.to(device)
 
             # TODO: Clean data from the pair dataset side
 
@@ -72,7 +75,6 @@ class PairDataset(Dataset):
             _targets = self.targets[idx].view(-1)
             row_indices = torch.searchsorted(self._target_loc, _targets)
             limits = self._col_idx[row_indices]
-            print(self._col_idx)
             random_cols = (torch.rand(len(limits), device=self._device) * limits).long()
             pair_idx = self._target_map[row_indices, random_cols]
         else:
