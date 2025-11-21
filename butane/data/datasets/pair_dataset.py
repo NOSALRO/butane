@@ -59,7 +59,7 @@ class PairDataset(Dataset):
             self._target_loc = self._target_loc.to(device)
             self._target_map = self._target_map.to(device)
             self._col_idx = self._col_idx.to(device)
-            self.anchor_row_idx = torch.searchsorted(unique_targets_pair, self.targets.view(-1))
+            self._anchor_row_idx = torch.searchsorted(unique_targets_pair, self.targets.view(-1))
 
             # TODO: Clean data from the pair dataset side
 
@@ -67,7 +67,7 @@ class PairDataset(Dataset):
     def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
 
         if self._has_targets() and self._has_targets_pair():
-            row_indices = self.anchor_row_idx[idx]
+            row_indices = self._anchor_row_idx[idx]
             limits = self._col_idx[row_indices]
             random_cols = (torch.rand(limits.numel(), device=self._device) * limits).long()
             pair_idx = self._target_map[row_indices, random_cols]
@@ -123,6 +123,7 @@ class PairDataset(Dataset):
             self._target_loc = self._target_loc.to(device)
             self._target_map = self._target_map.to(device)
             self._col_idx = self._col_idx.to(device)
+            self._anchor_row_idx = self._anchor_row_idx.to(device)
         self._device = device
         return self
 
