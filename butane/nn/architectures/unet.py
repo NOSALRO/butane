@@ -1,5 +1,4 @@
 from typing import Callable, Optional, Union, Tuple
-from abc import abstractmethod
 from functools import partial
 import copy
 import math
@@ -16,21 +15,8 @@ from ..modules.attention import (
 )
 from ..modules.embeddings import SinusoidalEmbeddings, LearnableEmbeddings, FourierEmbeddings
 from ..utils import utils
+from ..wrapper import XDependent, XDependentSequential
 
-class XDependent(torch.nn.Module):
-
-    @abstractmethod
-    def forward(self, x: torch.Tensor, e: torch.Tensor): ...
-
-
-class XDependentSequential(torch.nn.Sequential, XDependent):
-    def forward(self, x: torch.Tensor, e: torch.Tensor) -> torch.Tensor:
-        for layer in self:
-            if isinstance(layer, XDependent):
-                x = layer(x, e)
-            else:
-                x = layer(x)
-        return x
 
 class DownsampleNd(torch.nn.Module):
     conv: torch.nn.Module
