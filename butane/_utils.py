@@ -34,20 +34,27 @@ def center_mask(
     mask[..., mH - lH:mH + lH, mW - lW:mW + lW] = 0.
     return x * mask
 
-def checkerboard_mask(
-    x: torch.Tensor,
-    tile_size: int
-) -> torch.Tensor:
+def checkerboard_mask(x: torch.Tensor, tile_size: int) -> torch.Tensor:
     height, width = x.shape[-2:]
     padded_height = mth.ceil(height / tile_size) * tile_size
     padded_width = mth.ceil(width / tile_size) * tile_size
     num_tiles = max(padded_height // tile_size, padded_width // tile_size)
 
-    tile_pattern = torch.ones((num_tiles, num_tiles))
-    tile_pattern[::2, ::2] = 0.
+    tile_pattern = torch.block_diag(torch.ones((tile_size, tile_size)), torch.ones((tile_size, tile_size)))
+    mask = tile_pattern.repeat(num_tiles//2, num_tiles//2)
+    mask = mask[:height, :width]
+    return (x * mask).to(x.dtype)
 
+def random_mask(x: torch.Tensor, tile_size: int) -> torch.Tensor:
+    height, width = x.shape[-2:]
+    padded_height = mth.ceil(height / tile_size) * tile_size
+    padded_width = mth.ceil(width / tile_size) * tile_size
+    num_tiles = max(padded_height // tile_size, padded_width // tile_size)
+
+    tile_pattern = torch.zeros((num_tiles, num_tiles))
+    random_mask = torch.randint(0, 2, size=(num_tiles, num_tiles))
+    tile_pattern = tile_pattern + random_mask
     tile_block = torch.ones((tile_size, tile_size))
     mask = torch.kron(tile_pattern, tile_block)
     mask = mask[:height, :width]
-
-    return x * mask
+    return (x * mask).to(x.dtype)
