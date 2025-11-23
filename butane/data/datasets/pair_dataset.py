@@ -12,7 +12,7 @@ class PairDataset(Dataset):
         self,
         data: torch.Tensor,
         data_pair: torch.Tensor,
-        targets: Optiona[torch.Tensor] = None,
+        targets: Optional[torch.Tensor] = None,
         targets_pair: Optional[torch.Tensor] = None,
         *,
         on_demand_device_load: bool = False,
