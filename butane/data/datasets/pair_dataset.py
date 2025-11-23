@@ -66,6 +66,14 @@ class PairDataset(Dataset):
     # TODO: Optimize
     def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
 
+        if isinstance(idx, slice):
+            start, stop, step = idx.indices(len(self))
+            idx = torch.arange(start, stop, step, device=self._device)
+        elif isinstance(idx, int):
+            idx = torch.tensor([idx], device=self._device)
+        else: # List
+            idx = torch.tensor(idx, device=self._device)
+
         if self._has_targets() and self._has_targets_pair():
             row_indices = self._anchor_row_idx[idx]
             limits = self._col_idx[row_indices]
