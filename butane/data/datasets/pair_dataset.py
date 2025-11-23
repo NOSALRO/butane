@@ -11,9 +11,9 @@ class PairDataset(Dataset):
     def __init__(
         self,
         data: torch.Tensor,
-        targets: torch.Tensor,
         data_pair: torch.Tensor,
-        targets_pair: torch.Tensor,
+        targets: Optiona[torch.Tensor] = None,
+        targets_pair: Optional[torch.Tensor] = None,
         *,
         on_demand_device_load: bool = False,
         return_tuple: bool = False,
