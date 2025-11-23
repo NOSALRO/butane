@@ -18,4 +18,4 @@ from butane.data import (
 )
 
 from butane.math.ops import *
-from ._utils import *
+from butane import _utils as utils
