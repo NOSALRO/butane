@@ -82,12 +82,12 @@ class PairDataset(Dataset):
         else:
             pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx), ), device=self._device)
 
-        _data = self.data[idx]
-        _data_pair = self.data_pair[pair_idx]
+        _data = self.data[*idx]
+        _data_pair = self.data_pair[*pair_idx]
         if self._on_demand_device_load:
             _data = _data.to(self._device)
             _data_pair = _data_pair.to(self._device)
-        return self._convert_to_tuple(dict(data=_data.squeeze(0), targets=_data_pair.squeeze(0)))
+        return self._convert_to_tuple(dict(data=_data, targets=_data_pair))
 
 
     def split(self, percentage: float):
