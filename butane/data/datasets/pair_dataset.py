@@ -82,8 +82,8 @@ class PairDataset(Dataset):
         else:
             pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx), ), device=self._device)
 
-        _data = self.data[*idx]
-        _data_pair = self.data_pair[*pair_idx]
+        _data = self.data[idx.item() if idx.numel() == 1 else idx.ravel()]
+        _data_pair = self.data_pair[pair_idx.item() if pair_idx.numel() == 1 else pair_idx.ravel()]
         if self._on_demand_device_load:
             _data = _data.to(self._device)
             _data_pair = _data_pair.to(self._device)
