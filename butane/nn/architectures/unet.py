@@ -1,4 +1,5 @@
-from typing import Callable, Optional, Union, Tuple
+from typing import Callable, Optional, Union, Tuple, List
+import warnings
 from functools import partial
 import copy
 import math
@@ -112,6 +113,7 @@ class ResBlockNd(XDependent):
         dropout: float = 0.0,
         use_film: bool = True,
         use_shortcut_conv: bool = False,
+        zero_out: bool = True,
     ):
 
         super().__init__()
@@ -147,7 +149,11 @@ class ResBlockNd(XDependent):
             torch.nn.Dropout(p=dropout)
         )
 
-        self.output_layer = utils.zero_module(self.conv(output_channels, output_channels, kernel_size=3, padding=1))
+        self.output_layer = (
+            utils.zero_module(self.conv(output_channels, output_channels, kernel_size=3, padding=1)) 
+            if zero_out else
+            self.conv(output_channels, output_channels, kernel_size=3, padding=1)
+        )
 
         if output_channels == input_dims[0]:
             self.shortcut = torch.nn.Identity()
@@ -205,7 +211,8 @@ class ConditionProjectionBlockNd(torch.nn.Module):
         n_residual_blocks: int = 1,
         dropout: float = 0.0,
         attention: Optional[torch.nn.Module] = None,
-        use_film: bool = True
+        use_film: bool = True,
+        zero_out: bool = False
     ) -> None:
         super().__init__()
         self._input_dims = input_dims
@@ -223,6 +230,7 @@ class ConditionProjectionBlockNd(torch.nn.Module):
                 output_channels=channels,
                 use_film=use_film,
                 downsample=True,
+                zero_out=zero_out,
             ))
             _updated_input_dims = utils.calculate_output_size(self.blocks[-1], input_dims=_updated_input_dims)
 
@@ -241,7 +249,7 @@ class ConditionProjectionBlockNd(torch.nn.Module):
             hidden_dims=[embedding_size],
             activation_function=[torch.nn.SiLU()],
             output_activation=True,
-            zero_out=True,
+            zero_out=zero_out,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -358,8 +366,19 @@ class UNetNd(torch.nn.Module):
         self._condition_input_dims = condition_input_dims if condition_input_dims is not None else copy.copy(self._input_dims)
         self._resample_with_resblock = resample_with_resblock
         self._n_residual_blocks = n_residual_blocks
-
         self._concat_condition = concat_condition
+        if len(self._condition_input_dims) != len(self._input_dims) and project_condition:
+            if self._concat_condition:
+                self._concat_condition = False
+                warnings.warn("Concat condition is disabled; Concat condition can not be used with conditions of different modalities", UserWarning)
+            if len(self._condition_input_dims) == 2:
+                self.condition_block = ConditionProjectionBlock1d
+            elif len(self._condition_input_dims) == 4:
+                self.condition_block = ConditionProjectionBlock3d
+        elif len(self._condition_input_dims) != len(self._input_dims) and not project_condition:
+            raise ValueError("For different modalities of condition and input, condition projection should be on")
+
+
         if self._concat_condition:
             self._input_dims[0] += self._condition_input_dims[0]
 
@@ -399,16 +418,18 @@ class UNetNd(torch.nn.Module):
             self._time_embedding_size = None
             self._embedding_size = None
 
-        if project_condition and self._n_classes is None:
+        if project_condition:
             self.condition_projection = self.condition_block(
                 input_dims=self._condition_input_dims,
                 channels=self._channels[0],
                 embedding_size=self._embedding_size,
                 dropout=condition_dropout,
                 n_residual_blocks=condition_n_residuals,
+                zero_out=zero_conv,
                 attention=self.attention if condition_attention else None,
             )
-        elif self._n_classes is not None:
+
+        if self._n_classes is not None:
             self.class_embedder = torch.nn.Embedding(self._n_classes, self._embedding_size)
 
         self.input_layer = self.conv(self._input_dims[0], self._channels[0], 3, padding=1)
@@ -426,6 +447,7 @@ class UNetNd(torch.nn.Module):
                         embedding_size=self._embedding_size,
                         dropout=self._dropout,
                         output_channels=ch,
+                        zero_out=zero_conv,
                         use_film=self._use_film
                 ))
                 _updated_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_updated_input_dims)
@@ -444,6 +466,7 @@ class UNetNd(torch.nn.Module):
                         dropout=self._dropout,
                         output_channels=ch,
                         use_film=self._use_film,
+                        zero_out=zero_conv,
                         downsample=True,
                     ) if self._resample_with_resblock
                     else self.downsample(_updated_input_dims, use_conv=conv_resample, output_channels=ch)
@@ -461,6 +484,7 @@ class UNetNd(torch.nn.Module):
                     embedding_size=self._embedding_size,
                     dropout=self._dropout,
                     output_channels=_updated_input_dims[0],
+                    zero_out=zero_conv,
                     use_film=self._use_film))
             if (i + 1) != n_middle_blocks:
                 _subblock.append(self.attention(_updated_input_dims[0]))
@@ -477,6 +501,7 @@ class UNetNd(torch.nn.Module):
                         embedding_size=self._embedding_size,
                         dropout=self._dropout,
                         output_channels=ch,
+                        zero_out=zero_conv,
                         use_film=self._use_film))
                 _updated_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_updated_input_dims)
 
@@ -491,11 +516,22 @@ class UNetNd(torch.nn.Module):
                             output_channels=ch,
                             use_film=self._use_film,
                             upsample=True,
+                            zero_out=zero_conv,
                         ) if self._resample_with_resblock
                         else self.upsample(_updated_input_dims, refine=conv_resample, output_channels=ch)
                     )
                     _updated_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_updated_input_dims)
                 self.upsample_blocks.append(XDependentSequential(*_subblock))
+
+        if self._concat_condition:
+            self.condition_residual_block = self.residual_block_creator(
+                input_dims=[_updated_input_dims[0] * 2, *_updated_input_dims[1:]],
+                embedding_size=self._embedding_size,
+                dropout=self._dropout,
+                output_channels=_updated_input_dims[0],
+                use_film=self._use_film,
+                zero_out=zero_conv,
+            )
 
         self.output_block = torch.nn.Sequential(
             torch.nn.GroupNorm(32, _updated_input_dims[0]),
@@ -508,7 +544,8 @@ class UNetNd(torch.nn.Module):
         self,
         x: torch.Tensor,
         t: Optional[torch.Tensor] = None,
-        c: Optional[torch.Tensor] = None,
+        c: Optional[torch.Tensor] = None, # Reference
+        y: Optional[torch.Tensor] = None, # Class
     ) -> torch.Tensor:
 
         emb = None
@@ -517,38 +554,63 @@ class UNetNd(torch.nn.Module):
             emb = self.time_embedder(t)
             emb = self.embedding_projection(emb)
 
-        if self._has_condition and c is None:
-            raise ValueError("Conditioning is enabled but no condition `c` was provided.")
-        elif not self._has_condition and c is not None:
-            raise ValueError("Conditioning is disabled; but condition `c` was provided.")
+        has_condition_inputs = (c is not None) or (y is not None)
+        if self._has_condition and not has_condition_inputs:
+            raise ValueError("Conditioning is enabled but no condition (c or y) was provided.")
+        elif not self._has_condition and has_condition_inputs:
+            raise ValueError("Conditioning is disabled, but conditions were provided.")
 
         if self._n_classes is not None:
-            assert len(c.shape) == 1
-            self.class_embedder(c)
-            emb = emb + c
-            return x, emb, c
+            if y is None:
+                 raise ValueError(f"Model requires {self._n_classes} class labels, but `y` is None.")
+            assert len(y.shape) == 1
+            y_emb = self.class_embedder(y)
+            emb = emb + y_emb if emb is not None else y_emb
 
         if self._concat_condition:
+            if c is None:
+                raise ValueError("Concat conditioning enabled, but reference `c` is None.")
             x = torch.cat([x, c], dim=1)
 
-        if hasattr(self, 'condition_projection') and emb is not None:
-            c = self.condition_projection(c)
-            if self._use_film:
-                c_gamma, c_beta = c.chunk(chunks=2, dim=1)
-                emb = emb * (1 + c_gamma) + c_beta
+        if hasattr(self, 'condition_projection') and c is not None:
+            c_emb = self.condition_projection(c)
+            if emb is None:
+                emb = c_emb
             else:
-                emb = emb + c
+                if self._use_film:
+                    c_gamma, c_beta = c_emb.chunk(chunks=2, dim=1)
+                    emb = emb * (1 + c_gamma) + c_beta
+                else:
+                    emb = emb + c_emb
         return x, emb, c
 
     def forward(
         self,
         x: torch.Tensor,
         t: Optional[torch.Tensor] = None,
-        c: Optional[torch.Tensor] = None,
+        c: Optional[Union[Tuple[torch.Tensor, int], torch.Tensor]] = None,
     ) -> torch.Tensor:
 
-        x, emb, c = self.prepare_conditioning(x, t, c)
+        y = None
+        if hasattr(self, 'condition_projection') and self._n_classes is not None:
+            # Case: Both Reference AND Class required
+            if not isinstance(c, tuple) or len(c) != 2:
+                raise ValueError("Model requires both Reference and Class. Provide c as tuple: (Reference, Label)")
+            c, y = c[0], c[1]
+        elif not hasattr(self, 'condition_projection') and self._n_classes is not None:
+            # Case: Class Only (c is interpreted as label y)
+            if isinstance(c, tuple):
+                 raise ValueError("Model requires Class only, but tuple provided.")
+            y, c = c, None
+        elif hasattr(self, 'condition_projection') and self._n_classes is None:
+             # Case: Reference Only
+             if isinstance(c, tuple):
+                 raise ValueError("Model requires Reference only, but tuple provided.")
+
+        x, emb, c = self.prepare_conditioning(x, t, c=c, y=y)
         h = self.input_layer(x)
+        if self._concat_condition:
+            _residual = h.clone()
 
         # f = []
         # for a in self.adapter.adapters:
@@ -574,6 +636,10 @@ class UNetNd(torch.nn.Module):
             _skip = _skip_connection.pop()
             h = torch.cat([h, _skip], dim=1)
             h = up(h, emb)
+
+        if self._concat_condition:
+            h = torch.cat((h, _residual), dim=1)
+            h = self.condition_residual_block(h, emb)
 
         return self.output_block(h)
 
