@@ -38,7 +38,7 @@ def drop_to_max_size(
         targets = y
 
     if max_size >= len(data):
-        return
+        return X, y
     if respect_targets and targets is not None and targets.dim() > 1:
         warnings.warn("butane.data.ops.drop_to_max_size: Targets are not class labels or they were not provied, respect_targets is now False", UserWarning)
         respect_targets = False
