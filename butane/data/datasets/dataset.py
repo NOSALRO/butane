@@ -17,7 +17,6 @@ class Dataset(torch.utils.data.Dataset):
         super().__init__()
         self.data = torch.tensor([]) if data is None else data.detach().clone().float()
         self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
-        self._has_targets = lambda: self.targets is not None and self.targets.numel() > 0
         self._device = device
         self._transforms, self._vectorized_transforms = None, None
         self._on_demand_device_load = on_demand_device_load
@@ -25,6 +24,9 @@ class Dataset(torch.utils.data.Dataset):
         if not self._on_demand_device_load:
             self.data = self.data.to(self._device)
             self.targets = self.targets.to(self._device)
+
+    def _has_targets(self):
+        return self.targets is not None and self.targets.numel() > 0
 
     def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
         _data = self.data[idx]

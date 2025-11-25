@@ -25,8 +25,6 @@ class PairDataset(Dataset):
         self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
         self.data_pair = torch.tensor([]) if data is None else data_pair.detach().clone().float()
         self.targets_pair = torch.tensor([]) if targets is None else targets_pair.detach().clone()
-        self._has_targets = lambda: self.targets is not None and self.targets.numel() > 0
-        self._has_targets_pair = lambda: self.targets_pair is not None and self.targets_pair.numel() > 0
         self._device = device
         self._transforms, self._vectorized_transforms = None, None
         self._on_demand_device_load = on_demand_device_load
@@ -56,31 +54,38 @@ class PairDataset(Dataset):
                 self._target_map[i] = torch.nn.functional.pad(pair, (0, max_num_of_instances - pair.numel()), value=-1, mode='constant')
 
             self._col_idx = (self._target_map != -1).sum(dim=1)
-            self._target_loc = self._target_loc.to(device)
-            self._target_map = self._target_map.to(device)
-            self._col_idx = self._col_idx.to(device)
             self._anchor_row_idx = torch.searchsorted(unique_targets_pair, self.targets.view(-1))
-
+            if not self._on_demand_device_load:
+                self._target_loc = self._target_loc.to(device)
+                self._target_map = self._target_map.to(device)
+                self._col_idx = self._col_idx.to(device)
             # TODO: Clean data from the pair dataset side
+
+    def _has_targets(self):
+        return self.targets is not None and self.targets.numel() > 0
+
+    def _has_targets_pair(self):
+        return self.targets_pair is not None and self.targets_pair.numel() > 0
 
     # TODO: Optimize
     def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
 
+        device = self._device if not self._on_demand_device_load else 'cpu'
         if isinstance(idx, slice):
             start, stop, step = idx.indices(len(self))
-            idx = torch.arange(start, stop, step, device=self._device)
+            idx = torch.arange(start, stop, step, device=device)
         elif isinstance(idx, int):
-            idx = torch.tensor([idx], device=self._device)
+            idx = torch.tensor([idx], device=device)
         else: # List
-            idx = torch.tensor(idx, device=self._device)
+            idx = torch.tensor(idx, device=device)
 
         if self._has_targets() and self._has_targets_pair():
             row_indices = self._anchor_row_idx[idx]
             limits = self._col_idx[row_indices]
-            random_cols = (torch.rand(limits.numel(), device=self._device) * limits).long()
+            random_cols = (torch.rand(limits.numel(), device=device) * limits).long()
             pair_idx = self._target_map[row_indices, random_cols]
         else:
-            pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx), ), device=self._device)
+            pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx), ), device=device)
 
         _data = self.data[idx.item() if idx.numel() == 1 else idx.ravel()]
         _data_pair = self.data_pair[pair_idx.item() if pair_idx.numel() == 1 else pair_idx.ravel()]
@@ -127,11 +132,11 @@ class PairDataset(Dataset):
                 self.targets = self.targets.to(device)
             if self._has_targets_pair():
                 self.targets_pair = self.targets_pair.to(device)
-        if self._has_targets_pair() and self._has_targets():
-            self._target_loc = self._target_loc.to(device)
-            self._target_map = self._target_map.to(device)
-            self._col_idx = self._col_idx.to(device)
-            self._anchor_row_idx = self._anchor_row_idx.to(device)
+            if self._has_targets_pair() and self._has_targets():
+                self._target_loc = self._target_loc.to(device)
+                self._target_map = self._target_map.to(device)
+                self._col_idx = self._col_idx.to(device)
+                self._anchor_row_idx = self._anchor_row_idx.to(device)
         self._device = device
         return self
 
