@@ -169,7 +169,7 @@ class DiTNd(torch.nn.Module):
         self._in_context_condition = in_context_condition
         self._cross_attention_condition = cross_attention_condition
         self._additive_condition = additive_condition
-        assert  self._in_context_condition ^ self._cross_attention_condition ^ self._additive_condition, (
+        assert  self._in_context_condition ^ self._cross_attention_condition ^ self._additive_condition or not (self._in_context_condition or self._cross_attention_condition or self._additive_condition), (
             "Multiple types of conditioning were selected, but only one type should be"
         )
 
@@ -194,9 +194,9 @@ class DiTNd(torch.nn.Module):
                 bias=[True]
         )
 
-        # assert not ((self._input_dims[1] % self._patch_size) or (self._input_dims[2] % self._patch_size)), (
-        #     "Input dimensions are not divisable by the patch size!"
-        # )
+        assert not reduce(lambda x, y: x+y, [self._input_dims[1:][i] % self._patch_size[i] for i in range(len(self._patch_size))]), (
+            "Input dimensions are not divisable by the patch size!"
+        )
 
         self._input_embeddings = torch.nn.Parameter(
             self._get_positional_embeddings(
@@ -217,9 +217,9 @@ class DiTNd(torch.nn.Module):
         if self._has_condition and self._n_classes is not None:
             self.class_embedder = torch.nn.Embedding(self._n_classes, self._hidden_dims)
         else:
-            # assert not ((self._condition_input_dims[1] % self._condition_patch_size) or (self._condition_input_dims[2] % self._condition_patch_size)), (
-            #     "Condition dimensions are not divisable by the patch size!"
-            # )
+            assert not reduce(lambda x, y: x+y, [self._condition_input_dims[1:][i] % self._condition_patch_size[i] for i in range(len(self._condition_patch_size))]), (
+                "Condition dimensions are not divisable by the patch size!"
+            )
 
             self._condition_embeddings = torch.nn.Parameter(
                 self._get_positional_embeddings(
