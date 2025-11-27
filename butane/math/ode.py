@@ -1,6 +1,38 @@
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple, Union, List
 import functools
 import torch
+
+def _to_tuple(x: Union[torch.Tensor, Tuple[torch.Tensor, ...]]) -> Tuple[torch.Tensor, ...]:
+    if isinstance(x, torch.Tensor):
+        x = (x,)
+    return x
+
+def _step(
+    func: Callable,
+    h: float,
+    x: Tuple[torch.Tensor, ...],
+) -> Tuple[torch.Tensor, ...]:
+
+    if len(x) == 1:
+        out = func(h, x[0])
+        return (out,) if isinstance(out, torch.Tensor) else out
+    out = func(h, x)
+    return out
+
+def _unwrap_output(
+    xs: List[torch.Tensor], 
+    dxs: Optional[List[torch.Tensor]], 
+    is_tensor: bool
+) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+
+    if is_tensor:
+        out_xs = xs[0]
+        out_dxs = dxs[0] if dxs is not None else None
+    else:
+        out_xs = tuple(xs)
+        out_dxs = tuple(dxs) if dxs is not None else None
+
+    return out_xs, out_dxs
 
 @torch.no_grad()
 def _euler_explicit(
@@ -10,59 +42,131 @@ def _euler_explicit(
     return_func_outputs: bool = False,
 ) -> torch.Tensor:
 
-    multi_inputs = True
-    if not isinstance(x0, (list, tuple)):
-        x0 = (x0,)
-        multi_inputs = False
+    _is_tensor = isinstance(x0, torch.Tensor)
+    x = _to_tuple(x0)
+    num_vars = len(x)
+    num_steps = len(steps)
+    xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
 
+    x = [instance.clone() for instance in x]
 
-    num_vars = len(x0)
-    _xs = [torch.empty(len(steps), *x0[i].shape) for i in range(num_vars)]
-    [_xs[i][0].copy_(x0[i]) for i in range(num_vars)]
-    _dxs = [torch.zeros(len(steps), *x0[i].shape) for i in range(num_vars)] if return_func_outputs else None
+    for i in range(num_vars):
+        xs[i][0] = x[i].clone()
 
-    _x = [x.clone() for x in x0]
+    dxs = None
+    if return_func_outputs:
+        dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+
     for k, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
-        _dx = func(h0, *_x)
-        if not isinstance(_dx, (list, tuple)):
-            _dx = (_dx,)
-        for i in range(num_vars):
-            _x[i].add_((h1 - h0) * _dx[i])
-            _xs[i][k].copy_(_x[i])
-            if return_func_outputs:
-                _dxs[i][k].copy_(_dx[i])
-    return (_xs, _dxs) if multi_inputs else (_xs[0], _dxs[0] if _dxs is not None else None)
+        dh = h1 - h0
+        _dx = _step(func, h0, tuple(x))
 
+        for i in range(num_vars):
+            x[i].add_(_dx[i], alpha=dh)
+            xs[i][k].copy_(x[i])
+            if return_func_outputs:
+                dxs[i][k].copy_(_dx[i])
+    return _unwrap_output(xs, dxs, _is_tensor)
+
+@torch.no_grad()
 def _rk4(
     func: Callable,
     x0: torch.Tensor,
     steps: torch.Tensor,
     return_func_outputs: bool = False,
 ) -> torch.Tensor:
-    solutions = torch.empty((len(steps), *x0.shape), device=x0.device, dtype=x0.dtype)
-    solutions[0] = x0
 
-    dx = None
+    _is_tensor = isinstance(x0, torch.Tensor)
+    x = _to_tuple(x0)
+    num_vars = len(x)
+    num_steps = len(steps)
+    xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+
+    x = [instance.clone() for instance in x]
+    _tmp_tensor = [instance.clone() for instance in x]
+
+    for i in range(num_vars):
+        xs[i][0] = x[i].clone()
+
+    dxs = None
     if return_func_outputs:
-        dx = torch.zeros((len(steps), *x0.shape), device=x0.device, dtype=x0.dtype)
+        dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
 
-    _x = x0
-    for i, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
-        _dh = h1 - h0
+    for k, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
+        dh = h1 - h0
+        dh_2 = dh / 2.0
 
-        k1 = func(h0, _x)
-        k2 = func(h0 + _dh / 2.0, _x + (k1 / 2.0) * _dh)
-        k3 = func(h0 + _dh / 2.0, _x + (k2 / 2.0) * _dh)
-        k4 = func(h0 + _dh, _x + k3 * _dh)
-        _dx = k1 + 2 * k2 + 2 * k3 + k4
-        _dxdh = _dx * (_dh / 6)
-        _x = _x + _dxdh
+        k1 = _step(func, h0, tuple(x))
+        for i in range(num_vars):
+            torch.add(x[i], k1[i], alpha=dh_2, out=_tmp_tensor[i])
 
-        solutions[i] = _x
-        if return_func_outputs:
-            dx[i] = _dx
-    return solutions, dx
+        k2 = _step(func, h0 + dh_2, tuple(_tmp_tensor))
+        for i in range(num_vars):
+            torch.add(x[i], k2[i], alpha=dh_2, out=_tmp_tensor[i])
 
+        k3 = _step(func, h0 + dh_2, tuple(_tmp_tensor))
+        for i in range(num_vars):
+            torch.add(x[i], k3[i], alpha=dh, out=_tmp_tensor[i])
+
+        k4 = _step(func, h1, tuple(_tmp_tensor))
+        for i in range(num_vars):
+            _tmp_tensor[i].copy_(k1[i])
+            _tmp_tensor[i].add_(k2[i], alpha=2.0)
+            _tmp_tensor[i].add_(k3[i], alpha=2.0)
+            _tmp_tensor[i].add_(k4[i])
+            _tmp_tensor[i].div_(6.0)
+            x[i].add_(_tmp_tensor[i], alpha=dh)
+
+            xs[i][k].copy_(x[i])
+            if return_func_outputs:
+                dxs[i][k].copy_(_tmp_tensor[i])
+
+    return _unwrap_output(xs, dxs, _is_tensor)
+
+@torch.no_grad()
+def _heun2(
+    func: Callable,
+    x0: torch.Tensor,
+    steps: torch.Tensor,
+    return_func_outputs: bool = False,
+) -> torch.Tensor:
+
+    _is_tensor = isinstance(x0, torch.Tensor)
+    x = _to_tuple(x0)
+    num_vars = len(x)
+    num_steps = len(steps)
+    xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+
+    x = [instance.clone() for instance in x]
+    _tmp_tensor = [instance.clone() for instance in x]
+
+    for i in range(num_vars):
+        xs[i][0] = x[i].clone()
+
+    dxs = None
+    if return_func_outputs:
+        dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+
+    for k, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
+        dh = h1 - h0
+
+        _dx_1 = _step(func, h0, tuple(x))
+        for i in range(num_vars):
+            torch.add(x[i], _dx_1[i], alpha=dh, out=_tmp_tensor[i])
+
+        _dx_2 = _step(func, h0 + dh, tuple(_tmp_tensor))
+
+        for i in range(num_vars):
+            _tmp_tensor[i].copy_(_dx_1[i])
+            _tmp_tensor[i].add_(_dx_2[i])
+            _tmp_tensor[i].mul_(0.5)
+            x[i].add_(_tmp_tensor[i], alpha=dh)
+
+            xs[i][k].copy_(x[i])
+            if return_func_outputs:
+                dxs[i][k].copy_(_tmp_tensor[i])
+
+    return _unwrap_output(xs, dxs, _is_tensor)
 
 def odeint(
     func: Callable,
@@ -74,8 +178,8 @@ def odeint(
 
     if method == "euler":
         return _euler_explicit(func, x0, steps, return_func_outputs)
-    if method == "euler_likelihood":
-        return _euler_explicit_liklihood(func, x0, steps)
+    if method == "heun2":
+        return _heun2(func, x0, steps, return_func_outputs)
     elif method == "rk4":
         return _rk4(func, x0, steps, return_func_outputs)
     else:

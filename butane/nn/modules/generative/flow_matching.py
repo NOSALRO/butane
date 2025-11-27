@@ -22,8 +22,17 @@ class FlowMatching(torch.nn.Module):
     def source_distribution(self) -> object:
         return self.__source_distribution
 
-    def sample_timesteps(self, n):
-        return torch.rand(n, 1).to(self._dummy_param.device)
+    def sample_timesteps(self, n: int, skewed: bool = False) -> torch.Tensor:
+        # https://github.com/facebookresearch/flow_matching/blob/25ae2d6a672468b58775f47ea086a2a8836be5a4/examples/image/training/train_loop.py#L26
+        if skewed:
+            mu = -1.2
+            std = 1.2
+            epsilon = torch.randn((n,), device=self._dummy_param.device)
+            sigma = (epsilon * std + mu).exp()
+            time = (1 / (1 + sigma)).clamp(0.0001, 1.0)
+            return time
+        else:
+            return torch.rand(n, 1).to(self._dummy_param.device)
 
     def forward(
         self,
@@ -147,7 +156,7 @@ class FlowMatching(torch.nn.Module):
         x1 = x1.to(self._dummy_param.device)
 
         for i, _x1 in enumerate(x1):
-            sols, log_det, _ = odeint(functools.partial(func, c=condition), (_x1, torch.zeros(_x1.size(0), device=_x1.device)), timesteps, method="euler_likelihood")
+            sols, log_det, _ = odeint(functools.partial(func, c=condition), (_x1, torch.zeros(_x1.size(0), device=_x1.device)), timesteps, method=method)
             x0 = sols[-1].cpu()
             log_p0 = self.__source_distribution.log_prob(x0).to(self._dummy_param.device)
             log_det = log_p0 + log_det[-1]
@@ -236,11 +245,17 @@ class MiddleVarianceFlowMatching(FlowMatching):
 
         while len(x0.size()) != len(t.size()):
             t = t[..., None]
+
         mu_t = t * x1 + (1 - t) * x0
-        sigma_t = self._sigma * (-4*(t - 0.5)**2 + 1)
+
+        scale = (-4 * (t - 0.5)**2 + 1)
+        sigma_t = self._sigma * scale
+        d_sigma_t = self._sigma * (-4 * (2 * t - 1))
+
         epsilon = torch.randn_like(x0)
         x_t = mu_t + sigma_t * epsilon
-        u_t = x1 - x0
+
+        u_t = (x1 - x0) + d_sigma_t * epsilon
         return x_t, u_t
 
 class CurvedFlowMatching(FlowMatching):
