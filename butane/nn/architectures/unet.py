@@ -546,7 +546,9 @@ class UNetNd(torch.nn.Module):
         t: Optional[torch.Tensor] = None,
         c: Optional[torch.Tensor] = None, # Reference
         y: Optional[torch.Tensor] = None, # Class
-    ) -> torch.Tensor:
+        *,
+        c_vectors: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor]:
 
         emb = None
         if t is not None:
@@ -573,16 +575,20 @@ class UNetNd(torch.nn.Module):
             x = torch.cat([x, c], dim=1)
 
         if hasattr(self, 'condition_projection') and c is not None:
-            c_emb = self.condition_projection(c)
+            if c_vectors is not None:
+                c_emb = c_vectors
+            else:
+                c_emb = self.condition_projection(c)
             if emb is None:
                 emb = c_emb
             else:
                 if self._use_film:
+                    print(c_emb.size())
                     c_gamma, c_beta = c_emb.chunk(chunks=2, dim=1)
                     emb = emb * (1 + c_gamma) + c_beta
                 else:
                     emb = emb + c_emb
-        return x, emb, c
+        return (x, emb)
 
     def forward(
         self,
@@ -607,26 +613,22 @@ class UNetNd(torch.nn.Module):
              if isinstance(c, tuple):
                  raise ValueError("Model requires Reference only, but tuple provided.")
 
-        x, emb, c = self.prepare_conditioning(x, t, c=c, y=y)
+        x, emb = self.prepare_conditioning(x, t, c=c, y=y)
+        return self.unet_forward(x, emb)
+
+    def unet_forward(
+        self,
+        x: torch.Tensor,
+        emb: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+
         h = self.input_layer(x)
         if self._concat_condition:
             _residual = h.clone()
 
-        # f = []
-        # for a in self.adapter.adapters:
-        #     c = a(c)
-        #     f.append(c)
-
-        # stage = 1
-        # _skip_connection = [h + f[0]]
         _skip_connection = [h]
         for i, down in enumerate(self.downsample_blocks):
             h = down(h, emb)
-            # if self._resampled[i]:
-            #     r = f[stage]
-            #     r = torch.nn.functional.interpolate(r, size=h.shape[2:])
-            #     h = h + r
-            #     stage+=1
             _skip_connection.append(h)
 
         for mb in self.middle_blocks:
