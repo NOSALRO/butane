@@ -583,7 +583,6 @@ class UNetNd(torch.nn.Module):
                 emb = c_emb
             else:
                 if self._use_film:
-                    print(c_emb.size())
                     c_gamma, c_beta = c_emb.chunk(chunks=2, dim=1)
                     emb = emb * (1 + c_gamma) + c_beta
                 else:
