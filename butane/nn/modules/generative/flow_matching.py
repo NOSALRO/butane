@@ -1,6 +1,7 @@
 from typing import Optional, Callable, Union, Tuple
 import time
 import functools
+import itertools
 import torch
 # import torchdiffeq
 from ....math import *
@@ -75,14 +76,18 @@ class FlowMatching(torch.nn.Module):
         if multiple_gen_per_condition:
             n_generations, n_conditions = x0.size(0), x0.size(1)
             x0 = x0.transpose(0, 1).flatten(0, 1)
-            condition = condition.repeat_interleave(n_generations, dim=0)
+            if condition is not None:
+                condition = condition.repeat_interleave(n_generations, dim=0)
 
         func = lambda t, x, c: model(x, t.expand(x.size(0), 1), c)
 
-        for x0_batch, cond_batch in zip(
-            batching(x0, batch_size, dim=0),
-            batching(condition, batch_size, dim=0),
-        ):
+        x0_iter = batching(x0, batch_size, dim=0)
+        if condition is not None:
+            condition_iter = batching(condition, batch_size, dim=0)
+        else:
+            condition_iter = itertools.repeat(None)
+
+        for x0_batch, cond_batch in zip(x0_iter, condition_iter):
             x, v = odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method, return_model_outputs)
             # x = torchdiffeq.odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method='explicit_adams')
             # v = torch.zeros_like(x)
