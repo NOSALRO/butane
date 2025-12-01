@@ -46,6 +46,8 @@ class Dataset(torch.utils.data.Dataset):
             return self._convert_to_tuple({ "data": _data })
 
     def split(self, percentage: float):
+        if percentage == 0:
+            return None
         _transforms = self._transforms
         (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage)
         self.__init__(

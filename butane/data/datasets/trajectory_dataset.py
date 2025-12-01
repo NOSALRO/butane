@@ -70,6 +70,8 @@ class TrajectoryDataset(Dataset):
                 "targets": seq_future if self._transforms is None else self._transforms(seq_future)})
 
     def split(self, percentage: float):
+        if percentage == 0:
+            return None
         (split_1_data, _), (split_2_data, _) = self._split(percentage)
         transforms = self._transforms
         self.__init__(

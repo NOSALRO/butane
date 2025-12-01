@@ -96,6 +96,8 @@ class PairDataset(Dataset):
 
 
     def split(self, percentage: float):
+        if percentage == 0:
+            return None
         _transforms = self._transforms
         (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage, self.data, self.targets)
         (split_1_data_pair, split_1_targets_pair), (split_2_data_pair, split_2_targets_pair) = self._split(percentage, self.data_pair, self.targets_pair)
