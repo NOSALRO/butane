@@ -18,6 +18,19 @@ def unfreeze_module(module) -> None:
     for p in module.parameters():
         p.requires_grad = True
 
+def compute_grad_norm(model: torch.nn.Module) -> torch.Tensor:
+    grads [
+        p.grad.detach()
+        for p in model.parameters()
+        if p.grad is not None
+    ]
+
+    if not len(grads):
+        return 0.0
+
+    device = grads[0].device
+    return torch.norm(torch.stack([torch.norm(g, 2.0).to(device) for g in grads]), 2.0)
+
 def calculate_output_size(*modules, input_dims: IntParams) -> torch.Tensor:
     _input = torch.randn(1, *input_dims)
     out_sz = None
