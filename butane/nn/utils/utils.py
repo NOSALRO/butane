@@ -19,7 +19,7 @@ def unfreeze_module(module) -> None:
         p.requires_grad = True
 
 def compute_grad_norm(model: torch.nn.Module) -> torch.Tensor:
-    grads [
+    grads = [
         p.grad.detach()
         for p in model.parameters()
         if p.grad is not None
