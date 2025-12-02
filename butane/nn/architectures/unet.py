@@ -248,7 +248,7 @@ class ConditionProjectionBlockNd(torch.nn.Module):
             output_dims=embedding_size * 2 if use_film else embedding_size,
             hidden_dims=[embedding_size],
             activation_function=[torch.nn.SiLU()],
-            output_activation=True,
+            output_activation=False,
             zero_out=zero_out,
         )
 
@@ -351,6 +351,8 @@ class UNetNd(torch.nn.Module):
         condition_dropout: float = 0.,
         condition_n_residuals: int = 2,
         condition_attention: bool = False,
+        condition_projection_module: Optional[torch.nn.Module] = None,
+        pretrained_condition_module: bool = False,
     ):
         super().__init__()
         self._input_dims = input_dims
@@ -367,6 +369,7 @@ class UNetNd(torch.nn.Module):
         self._resample_with_resblock = resample_with_resblock
         self._n_residual_blocks = n_residual_blocks
         self._concat_condition = concat_condition
+        self._pretrained_condition_module = pretrained_condition_module
         if len(self._condition_input_dims) != len(self._input_dims) and project_condition:
             if self._concat_condition:
                 self._concat_condition = False
@@ -419,15 +422,31 @@ class UNetNd(torch.nn.Module):
             self._embedding_size = None
 
         if project_condition:
-            self.condition_projection = self.condition_block(
-                input_dims=self._condition_input_dims,
-                channels=self._channels[0],
-                embedding_size=self._embedding_size,
-                dropout=condition_dropout,
-                n_residual_blocks=condition_n_residuals,
-                zero_out=zero_conv,
-                attention=self.attention if condition_attention else None,
-            )
+            if condition_projection_module is None:
+                self.condition_projection = self.condition_block(
+                    input_dims=self._condition_input_dims,
+                    channels=self._channels[0],
+                    embedding_size=self._embedding_size,
+                    dropout=condition_dropout,
+                    n_residual_blocks=condition_n_residuals,
+                    zero_out=zero_conv,
+                    attention=self.attention if condition_attention else None,
+                )
+            else:
+                self.condition_projection = torch.nn.Sequential(condition_projection_module)
+                _condition_module_output_dims = utils.calculate_output_size(self.condition_projection, input_dims=self._condition_input_dims)
+                _projector = MLPBlock(
+                    input_dims=_condition_module_output_dims.prod().int(),
+                    output_dims=self._embedding_size * 2 if self._use_film else self._embedding_size,
+                    hidden_dims=[self._embedding_size],
+                    activation_function=[torch.nn.SiLU()],
+                    output_activation=False,
+                    zero_out=True,
+                )
+                self.condition_projection.extend([
+                    torch.nn.Flatten(1),
+                    _projector
+                ])
 
         if self._n_classes is not None:
             self.class_embedder = torch.nn.Embedding(self._n_classes, self._embedding_size)
@@ -643,6 +662,13 @@ class UNetNd(torch.nn.Module):
             h = self.condition_residual_block(h, emb)
 
         return self.output_block(h)
+
+    def train(self, mode=True):
+        super().train(mode)
+        if mode:
+            if self._pretrained_condition_module:
+                self.condition_projection[0].eval()
+        return self
 
 
 class UNet1d(UNetNd):
