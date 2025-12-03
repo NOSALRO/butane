@@ -9,10 +9,10 @@ from ..modules.residual_blocks import *
 from ..modules.conv_blocks import Conv1dBlock, Conv2dBlock, Conv3dBlock
 from ..modules.mlp_block import MLPBlock
 from ..modules.attention import (
-    LocalSelfAttention1d,
-    LocalSelfAttention2d,
-    LocalCrossAttention1d,
-    LocalCrossAttention2d
+    SpatialSelfAttention1d,
+    SpatialSelfAttention2d,
+    SpatialCrossAttention1d,
+    SpatialCrossAttention2d
 )
 from ..modules.embeddings import SinusoidalEmbeddings, LearnableEmbeddings, FourierEmbeddings
 from ..utils import utils
@@ -348,6 +348,7 @@ class UNetNd(torch.nn.Module):
         concat_condition: bool = False,
         project_condition: bool = False,
         condition_input_dims: Optional[IntParams] = None,
+        condition_concat_projection: bool = False,
         condition_dropout: float = 0.,
         condition_n_residuals: int = 2,
         condition_attention: bool = False,
@@ -369,7 +370,9 @@ class UNetNd(torch.nn.Module):
         self._resample_with_resblock = resample_with_resblock
         self._n_residual_blocks = n_residual_blocks
         self._concat_condition = concat_condition
+        self._condition_concat_projection = condition_concat_projection
         self._pretrained_condition_module = pretrained_condition_module
+
         if len(self._condition_input_dims) != len(self._input_dims) and project_condition:
             if self._concat_condition:
                 self._concat_condition = False
@@ -430,6 +433,7 @@ class UNetNd(torch.nn.Module):
                     dropout=condition_dropout,
                     n_residual_blocks=condition_n_residuals,
                     zero_out=zero_conv,
+                    use_film=self._use_film and (not self._condition_concat_projection),
                     attention=self.attention if condition_attention else None,
                 )
             else:
@@ -455,6 +459,9 @@ class UNetNd(torch.nn.Module):
         _updated_input_dims = utils.calculate_output_size(self.input_layer, input_dims=self._input_dims)
         _downsampling_channels = [self._channels[0]]
         self._resampled = []
+
+        if self._condition_concat_projection:
+            self._embedding_size *= 2
 
         self.downsample_blocks = torch.nn.ModuleList([])
         for i, ch in enumerate(self._channels):
@@ -601,7 +608,9 @@ class UNetNd(torch.nn.Module):
             if emb is None:
                 emb = c_emb
             else:
-                if self._use_film:
+                if self._condition_concat_projection:
+                    emb = torch.hstack((emb, c_emb))
+                elif self._use_film:
                     c_gamma, c_beta = c_emb.chunk(chunks=2, dim=1)
                     emb = emb * (1 + c_gamma) + c_beta
                 else:
@@ -679,7 +688,7 @@ class UNet1d(UNetNd):
     residual_block_creator = ResBlock1d
     downsample = Downsample1d
     upsample = Upsample1d
-    attention_block = LocalSelfAttention1d
+    attention_block = SpatialSelfAttention1d
     condition_block = ConditionProjectionBlock1d
     dims = 1
 
@@ -691,7 +700,7 @@ class UNet2d(UNetNd):
     residual_block_creator = ResBlock2d
     downsample = Downsample2d
     upsample = Upsample2d
-    attention_block = LocalSelfAttention1d
+    attention_block = SpatialSelfAttention1d
     condition_block = ConditionProjectionBlock2d
     dims = 2
 
@@ -703,6 +712,6 @@ class UNet3d(UNetNd):
     residual_block_creator = ResBlock3d
     downsample = Downsample3d
     upsample = Upsample3d
-    attention_block = LocalSelfAttention2d
+    attention_block = SpatialSelfAttention2d
     condition_block = ConditionProjectionBlock3d
     dims = 3

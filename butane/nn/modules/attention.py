@@ -75,7 +75,7 @@ class _AttentionTemplate(torch.nn.Module):
             return self.linear_projection(_attention.contiguous())
         return x1 + self.linear_projection(_attention.contiguous())
 
-class _LocalAttentionTemplate(torch.nn.Module):
+class _SpatialAttentionTemplate(torch.nn.Module):
 
     conv: torch.nn.Module
     N: int
@@ -192,24 +192,24 @@ class SelfAttention(_AttentionTemplate):
 
 class CrossAttention(_AttentionTemplate): ...
 
-class LocalSelfAttention(_LocalAttentionTemplate):
+class SpatialSelfAttention(_SpatialAttentionTemplate):
     def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None):
         return super().forward(x1, x2=None, mask=mask)
 
-class LocalCrossAttention(_LocalAttentionTemplate): ...
+class SpatialCrossAttention(_SpatialAttentionTemplate): ...
 
-class LocalSelfAttention1d(LocalSelfAttention):
+class SpatialSelfAttention1d(SpatialSelfAttention):
     conv = torch.nn.Conv1d
     N = 1
 
-class LocalSelfAttention2d(LocalSelfAttention):
+class SpatialSelfAttention2d(SpatialSelfAttention):
     conv = torch.nn.Conv2d
     N = 2
 
-class LocalCrossAttention1d(LocalCrossAttention):
+class SpatialCrossAttention1d(SpatialCrossAttention):
     conv = torch.nn.Conv1d
     N = 1
 
-class LocalCrossAttention2d(LocalCrossAttention):
+class SpatialCrossAttention2d(SpatialCrossAttention):
     conv = torch.nn.Conv2d
     N = 2

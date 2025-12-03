@@ -6,7 +6,6 @@ from ..._typedefs import *
 from ..modules.residual_blocks import *
 from ..modules.conv_blocks import Conv1dBlock, Conv2dBlock, Conv3dBlock
 from ..modules.mlp_block import MLPBlock
-from ..modules.attention import LocalSelfAttention1d, LocalSelfAttention2d
 from ..modules.embeddings import SinusoidalEmbeddings, LearnableEmbeddings
 from ..utils import utils
 

@@ -11,10 +11,10 @@ from ..modules.mlp_block import MLPBlock
 from ..modules.attention import (
     SelfAttention,
     CrossAttention,
-    LocalSelfAttention1d,
-    LocalSelfAttention2d,
-    LocalCrossAttention1d,
-    LocalCrossAttention2d
+    SpatialSelfAttention1d,
+    SpatialSelfAttention2d,
+    SpatialCrossAttention1d,
+    SpatialCrossAttention2d
 )
 from ..modules.embeddings import (
     SinusoidalEmbeddings,

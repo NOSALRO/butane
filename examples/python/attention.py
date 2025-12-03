@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
 
     start_t = time.monotonic()
-    local_attention = butane.nn.LocalSelfAttention1d(
+    local_attention = butane.nn.SpatialSelfAttention1d(
         64,
         n_heads = 2,
         kernel_size = 3,
