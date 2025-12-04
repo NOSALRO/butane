@@ -55,13 +55,14 @@ class FlowMatching(torch.nn.Module):
         reverse: bool = False,
         return_model_outputs: bool = False,
         batch_size: int = 128,
-    ) -> torch.Tensor:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         model.to(self._dummy_param.device)
         x0 = x0.to(self._dummy_param.device)
         xs, vs = [], []
         n_generations = 1
         n_conditions = x0.size(0)
+        spatial_dims = x0.shape[1:]
 
         if condition is not None:
             condition = condition.to(self._dummy_param.device)
@@ -75,6 +76,7 @@ class FlowMatching(torch.nn.Module):
 
         if multiple_gen_per_condition:
             n_generations, n_conditions = x0.size(0), x0.size(1)
+            spatial_dims = x0.shape[2:]
             x0 = x0.transpose(0, 1).flatten(0, 1)
             if condition is not None:
                 condition = condition.repeat_interleave(n_generations, dim=0)
@@ -100,12 +102,12 @@ class FlowMatching(torch.nn.Module):
             vs = torch.cat(vs, dim=1 if keep_record else 0)
 
         def _revert_shape(x: torch.Tensor):
-           return x.view(
+            return x.view(
                 n_timesteps if keep_record else 1,
                 n_conditions,
                 n_generations if multiple_gen_per_condition else 1,
-                *x.shape[2:]
-            ).permute(2, 0, 1, *range(3, x.dim() + 1))
+                *spatial_dims,
+            ).movedim((0, 1, 2), (1, 2, 0))
 
         xs = _revert_shape(xs)
         if return_model_outputs:
