@@ -39,6 +39,14 @@ def _8gaussian_3d():
     ax.scatter(s[:, 0], s[:, 1], s[:, 2], s=3)
     plt.show()
 
+def _disjoint_circle():
+    sampler = butane.data.toy.sampler(butane.data.toy.make_disjoint_circle)
+    data, c = sampler(10000)
+    fig, ax = plt.subplots()
+    ax.scatter(data[:, 0], data[:, 1], s=3)
+    ax.scatter(c[:, 0], c[:, 1], s=3)
+    plt.show()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", type=str, default=None)
@@ -54,3 +62,5 @@ if __name__ == "__main__":
         _spiral_3d()
     if args.name == "8gaussians_3d":
         _8gaussian_3d()
+    if args.name == "disjoint_circle":
+        _disjoint_circle()

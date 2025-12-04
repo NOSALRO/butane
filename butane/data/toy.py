@@ -1,3 +1,4 @@
+from typing import Tuple, Callable
 import math
 import torch
 import numpy as np
@@ -38,7 +39,7 @@ def make_eight_normal(
     data = torch.stack(data)
     return data.float()
 
-def make_moons(n_samples: int = 10_000, noise_coef: float = 0.05) -> torch.Tensor:
+def make_moons(n_samples: int = 10_000, noise_coef: float = 0.05) -> Tuple[torch.Tensor, torch.Tensor]:
     n_samples_1 = n_samples // 2
     n_samples_2 = n_samples - n_samples_1
     x1 = torch.cos(torch.linspace(0, torch.pi, n_samples_1))
@@ -56,7 +57,7 @@ def make_moons(n_samples: int = 10_000, noise_coef: float = 0.05) -> torch.Tenso
     moons = moons + noise_coef * torch.randn_like(moons)
     return moons, labels
 
-def make_pinwheel(n_samples=2000, n_classes=5, noise=0.1):
+def make_pinwheel(n_samples: int = 2000, n_classes: int = 5, noise: float = 0.1) -> Tuple[torch.Tensor, torch.Tensor]:
     points_per_class = n_samples // n_classes
     data = []
     labels = []
@@ -69,10 +70,26 @@ def make_pinwheel(n_samples=2000, n_classes=5, noise=0.1):
         labels.append(torch.full((points_per_class,), k))
     return torch.cat(data), torch.cat(labels)
 
-def make_ring(n_samples=2000, r_min=0.3, r_max=0.6):
+def make_ring(n_samples: int = 2000, r_min: float = 0.3, r_max: float = 0.6) -> torch.Tensor:
     theta = torch.rand(n_samples) * 2 * np.pi
     r = torch.rand(n_samples) * (r_max - r_min) + r_min
     x = r * torch.cos(theta)
     y = r * torch.sin(theta)
     return torch.stack([x, y], dim=1)
 
+def make_disjoint_circle(n_samples: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        n_half = n_samples // 2
+        # Arc 1: -90 to 0 degrees
+        theta1 = torch.rand(n_half) * (np.pi/2) - np.pi/2
+        # Arc 2: 90 to 180 degrees
+        theta2 = torch.rand(n_samples - n_half) * (np.pi/2) + np.pi/2
+
+        theta = torch.cat([theta1, theta2])
+        c = torch.stack([torch.cos(theta), torch.sin(theta)], dim=1)
+        target_angle = theta * 4.0
+        x_mean = torch.stack([torch.cos(target_angle), torch.sin(target_angle)], dim=1)
+        x = x_mean + torch.randn_like(x_mean) * 0.05
+        return x, c
+
+def sampler(func: Callable, *args, **kwargs) -> Callable:
+    return lambda n: func(n, *args, **kwargs)
