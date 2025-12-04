@@ -72,12 +72,12 @@ if __name__ == "__main__":
             sum_loss += loss.item()
         if ((epoch + 1) % 50) == 0:
             logger.checkpoint(epoch + 1, model=model, ema=ema, optimizer=optimizer)
-            ema.apply()
+            ema.enable()
             model.eval()
             eval_model(model, diffusion, logger.output_path)
-            ema.undo()
+            ema.disable()
             model.train()
         print(f"Epochs {epoch + 1} -> Loss: {sum_loss/len(dl)} Grad Norm: {sum_grad_norm / len(dl)}")
 
-    ema.apply()
+    ema.enable()
     model.eval()

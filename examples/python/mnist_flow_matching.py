@@ -117,10 +117,10 @@ if __name__ == "__main__":
         print(f"Epochs {epoch + 1} -> Loss: {sum_loss/len(dl)} Grad Norm: {sum_grad_norm / len(dl)}")
         if ((epoch + 1) % 10) == 0:
             logger.checkpoint(epoch + 1, model=model, optimizer=optimizer, ema=ema)
-            ema.apply()
+            ema.enable()
             model.eval()
             eval_model(model, fm, logger.output_path)
-            ema.undo()
+            ema.disable()
             model.train()
             logger.checkpoint(epoch+1, model=model, optimizer=optimizer, ema=ema)
 

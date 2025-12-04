@@ -12,6 +12,7 @@ class EMA(torch.nn.Module):
         start_update_at: int = 1,
         update_every: int = 1,
         exclude_bias: bool = False,
+        warmup_steps: int = 10,
     ):
         super().__init__()
         self.model = model
@@ -21,7 +22,8 @@ class EMA(torch.nn.Module):
         self._exclude_bias = exclude_bias
         self._excluded = set()
 
-        self._step = 0
+        self.register_buffer('_step', torch.tensor(0))
+        self.register_buffer('warmup_steps', torch.tensor(warmup_steps))
         self._shadow = {}
         self._backup = {}
         self._param_shadow_pairs = []
@@ -48,26 +50,27 @@ class EMA(torch.nn.Module):
             return
         if self._step % self._update_every:
             return
+        decay = min(self.decay, (1 + self._step) / (self.warmup_steps + self._step))
         for param, shadow in self._param_shadow_pairs:
             if shadow.device != param.device:
                 shadow.data = shadow.to(param.device)
-            shadow.lerp_(param, weight=1.0 - self.decay)
+            shadow.lerp_(param, weight=1.0 - decay)
 
     def switch(self) -> None:
         # Switch EMA: https://arxiv.org/pdf/2402.09240
         for param, shadow in self._param_shadow_pairs:
             param.data.copy_(shadow)
 
-    def apply(self) -> None:
+    def enable(self) -> None:
         # Store the current parameters and apply EMA
         if len(self._backup) != 0:
-            raise RuntimeError("EMA.apply() called twice without undo().")
+            raise RuntimeError("EMA.enable() called twice without undo().")
         for name, param in self.model.named_parameters():
             if name in self._shadow:
                 self._backup[name] = param.detach().clone()
                 param.data.copy_(self._shadow[name])
 
-    def undo(self) -> None:
+    def disable(self) -> None:
         for name, param in self.model.named_parameters():
             if name in self._backup:
                 param.data.copy_(self._backup[name])
@@ -81,7 +84,7 @@ class EMA(torch.nn.Module):
     @contextlib.contextmanager
     def average_parameters(self) -> Generator[None, None, None]:
         try:
-            self.apply()
+            self.enable()
             yield
         finally:
-            self.undo()
+            self.disable()
