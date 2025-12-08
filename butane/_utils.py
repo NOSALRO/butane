@@ -3,17 +3,26 @@ import math as mth
 import torch
 
 def batching(
-    x: torch.Tensor,
+    x: Union[torch.Tensor, Tuple[torch.Tensor,...], List[torch.Tensor]],
     batch_size: int = 64,
     *,
     dim: int = 0,
     drop_last: bool = False,
-) -> Generator[torch.Tensor, None, None]:
+) -> Generator[Union[torch.Tensor, Tuple[torch.Tensor,...], List[torch.Tensor]], None, None]:
 
-    end_step = x.size(dim) if not drop_last else x.size(dim) - (x.size(dim) % batch_size)
+    if isinstance(x, torch.Tensor):
+        end_step = x.size(dim) if not drop_last else x.size(dim) - (x.size(dim) % batch_size)
 
-    for step in range(0, end_step, batch_size):
-        yield x.index_select(dim, torch.arange(step, min(step + batch_size, x.size(dim)), device=x.device))
+        for step in range(0, end_step, batch_size):
+            yield x.index_select(dim, torch.arange(step, min(step + batch_size, x.size(dim)), device=x.device))
+    elif isinstance(x, (tuple, list)):
+        end_step = x[0].size(dim) if not drop_last else x[0].size(dim) - (x[0].size(dim) % batch_size)
+        for xi in x[1:]:
+            end_step = min(xi.size(dim) if not drop_last else xi.size(dim) - (xi.size(dim) % batch_size), end_step)
+
+        for step in range(0, end_step, batch_size):
+            out = ([xi.index_select(dim, torch.arange(step, min(step + batch_size, end_step), device=xi.device)) for xi in x])
+            yield tuple(out) if isinstance(x, tuple) else out
 
 def center_mask(
     x: torch.Tensor,

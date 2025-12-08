@@ -42,6 +42,7 @@ class FlowMatching(torch.nn.Module):
         t: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]: ...
 
+    # Fix condition repettition -> Move it inside the loop, for memory efficiency
     @torch.no_grad()
     def flow(
         self,
@@ -57,21 +58,36 @@ class FlowMatching(torch.nn.Module):
         batch_size: int = 128,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
-        model.to(self._dummy_param.device)
-        x0 = x0.to(self._dummy_param.device)
+        _device = self._dummy_param.device
+        def to_device_recursive(c):
+            if isinstance(c, (tuple, list)):
+                return type(c)(to_device_recursive(i) for i in c)
+            if isinstance(c, torch.Tensor):
+                return c.to(_device)
+            return c
+
+        def repeat_recursive(c, repeats):
+            if isinstance(c, (tuple, list)):
+                return type(c)(repeat_recursive(i, repeats) for i in c)
+            if isinstance(c, torch.Tensor):
+                return c.repeat_interleave(repeats, dim=0)
+            return c
+
+        model.to()
+        x0 = x0.to(_device)
         xs, vs = [], []
         n_generations = 1
         n_conditions = x0.size(0)
         spatial_dims = x0.shape[1:]
 
         if condition is not None:
-            condition = condition.to(self._dummy_param.device)
+            condition = to_device_recursive(condition)
 
         timesteps = torch.linspace(
             0. if not reverse else 1.,
             1. if not reverse else 0.,
             n_timesteps,
-            device=self._dummy_param.device
+            device=_device
         )
 
         if multiple_gen_per_condition:
@@ -79,7 +95,7 @@ class FlowMatching(torch.nn.Module):
             spatial_dims = x0.shape[2:]
             x0 = x0.transpose(0, 1).flatten(0, 1)
             if condition is not None:
-                condition = condition.repeat_interleave(n_generations, dim=0)
+                condition = repeat_recursive(condition, n_generations)
 
         func = lambda t, x, c: model(x, t.expand(x.size(0), 1), c)
 
@@ -89,17 +105,25 @@ class FlowMatching(torch.nn.Module):
         else:
             condition_iter = itertools.repeat(None)
 
+        out_shape = (n_timesteps, x0.size(0), *spatial_dims) if keep_record else (x0.size(0), *spatial_dims)
+        xs = torch.empty(out_shape, device=_device, dtype=x0.dtype)
+        vs = torch.empty(out_shape, device=_device, dtype=x0.dtype) if return_model_outputs else None
+
+        current_idx = 0
         for x0_batch, cond_batch in zip(x0_iter, condition_iter):
+            batch_n = x0_batch.size(0)
             x, v = odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method, return_model_outputs)
             # x = torchdiffeq.odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method='explicit_adams')
             # v = torch.zeros_like(x)
-            xs.append(x[-1] if not keep_record else x)
-            if return_model_outputs:
-                vs.append(v[-1] if not keep_record else v)
-
-        xs = torch.cat(xs, dim=1 if keep_record else 0)
-        if return_model_outputs:
-            vs = torch.cat(vs, dim=1 if keep_record else 0)
+            if keep_record:
+                xs[:, current_idx: current_idx + batch_n] = x
+                if return_model_outputs:
+                    vs[:, current_idx: current_idx + batch_n] = v
+            else:
+                xs[current_idx: current_idx + batch_n] = x[-1]
+                if return_model_outputs:
+                    vs[current_idx: current_idx + batch_n] = v[-1]
+            current_idx += batch_n
 
         def _revert_shape(x: torch.Tensor):
             return x.view(
@@ -107,11 +131,15 @@ class FlowMatching(torch.nn.Module):
                 n_conditions,
                 n_generations if multiple_gen_per_condition else 1,
                 *spatial_dims,
-            ).movedim((0, 1, 2), (1, 2, 0))
+            ).movedim((0, 1, 2), (1, 2, 0)).squeeze(1)
 
         xs = _revert_shape(xs)
         if return_model_outputs:
             vs = _revert_shape(vs)
+
+        if not multiple_gen_per_condition:
+            xs = xs.squeeze(0)
+            if return_model_outputs: vs = vs.squeeze(0)
 
         return (xs, vs) if return_model_outputs else xs
 
