@@ -48,7 +48,7 @@ class DiTBlock(torch.nn.Module):
 
         self.norm_pre_sa = torch.nn.LayerNorm(self._input_dims, elementwise_affine=False, eps=1e-06)
         self.norm_pre_mlp = torch.nn.LayerNorm(self._input_dims, elementwise_affine=False, eps=1e-06)
-        self.attn = SelfAttention(self._input_dims, n_heads=num_heads, return_attention=True)
+        self.attn = SelfAttention(self._input_dims, n_heads=num_heads, apply_residual=False)
         self.mlp = MLPBlock(
             input_dims=self._input_dims,
             output_dims=self._input_dims,
