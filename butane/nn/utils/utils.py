@@ -90,8 +90,9 @@ def load_state(
         raise ("Model should be either torch.nn.Module or list of torch.nn.Modules")
 
     cp = None
-    if os.path.exists(fpath + "/checkpoint.pt"):
-        cp = torch.load(fpath + "/checkpoint.pt", map_location=_device)
+    for suffix in ["pt", "pth"]:
+        if os.path.exists(fpath + "/checkpoint." + suffix):
+            cp = torch.load(fpath + "/checkpoint." + suffix, map_location=_device, weights_only=suffix == ".pt")
 
     returns["model"] = __load(model, "model")
     returns["optimizer"] = __load(optimizer, "optimizer")
