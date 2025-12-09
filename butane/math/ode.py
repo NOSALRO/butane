@@ -68,8 +68,14 @@ def _euler_explicit(
             if return_trajectory:
                 xs[i][k].copy_(x[i])
                 if return_func_outputs:
-                    dxs[i][k].copy_(_dx[i])
+                    dxs[i][k-1].copy_(_dx[i])
+
+    # Instantenious evaluation; we cannot take any other step
+    _dx = _step(func, steps[-1], tuple(x))
     if return_trajectory:
+        for i in range(num_vars):
+            if return_func_outputs:
+                dxs[i][-1].copy_(_dx[i])
         return _unwrap_output(xs, dxs, _is_tensor)
     else:
         return _unwrap_output(x, _dx, _is_tensor)
@@ -128,9 +134,14 @@ def _rk4(
             if return_trajectory:
                 xs[i][k].copy_(x[i])
                 if return_func_outputs:
-                    dxs[i][k].copy_(_tmp_tensor[i])
+                    dxs[i][k-1].copy_(_tmp_tensor[i])
 
+    # Instantenious evaluation; we cannot take any other step
+    _dx = _step(func, steps[-1], tuple(x))
     if return_trajectory:
+        for i in range(num_vars):
+            if return_func_outputs:
+                dxs[i][-1].copy_(_dx[i])
         return _unwrap_output(xs, dxs, _is_tensor)
     else:
         return _unwrap_output(x, _tmp_tensor, _is_tensor)
@@ -179,9 +190,14 @@ def _heun2(
             if return_trajectory:
                 xs[i][k].copy_(x[i])
                 if return_func_outputs:
-                    dxs[i][k].copy_(_tmp_tensor[i])
+                    dxs[i][k-1].copy_(_tmp_tensor[i])
 
+    # Instantenious evaluation; we cannot take any other step
+    _dx = _step(func, steps[-1], tuple(x))
     if return_trajectory:
+        for i in range(num_vars):
+            if return_func_outputs:
+                dxs[i][-1].copy_(_dx[i])
         return _unwrap_output(xs, dxs, _is_tensor)
     else:
         return _unwrap_output(x, _tmp_tensor, _is_tensor)
