@@ -20,8 +20,8 @@ def _step(
     return out
 
 def _unwrap_output(
-    xs: List[torch.Tensor], 
-    dxs: Optional[List[torch.Tensor]], 
+    xs: List[torch.Tensor],
+    dxs: Optional[List[torch.Tensor]],
     is_tensor: bool
 ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
 
@@ -39,6 +39,7 @@ def _euler_explicit(
     func: Callable,
     x0: torch.Tensor,
     steps: torch.Tensor,
+    return_trajectory: bool = False,
     return_func_outputs: bool = False,
 ) -> torch.Tensor:
 
@@ -46,16 +47,17 @@ def _euler_explicit(
     x = _to_tuple(x0)
     num_vars = len(x)
     num_steps = len(steps)
-    xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
 
     x = [instance.clone() for instance in x]
 
-    for i in range(num_vars):
-        xs[i][0] = x[i].clone()
+    xs, dxs = None, None
+    if return_trajectory:
+        xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+        for i in range(num_vars):
+            xs[i][0] = x[i].clone()
 
-    dxs = None
-    if return_func_outputs:
-        dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+        if return_func_outputs:
+            dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
 
     for k, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
         dh = h1 - h0
@@ -63,16 +65,21 @@ def _euler_explicit(
 
         for i in range(num_vars):
             x[i].add_(_dx[i], alpha=dh)
-            xs[i][k].copy_(x[i])
-            if return_func_outputs:
-                dxs[i][k].copy_(_dx[i])
-    return _unwrap_output(xs, dxs, _is_tensor)
+            if return_trajectory:
+                xs[i][k].copy_(x[i])
+                if return_func_outputs:
+                    dxs[i][k].copy_(_dx[i])
+    if return_trajectory:
+        return _unwrap_output(xs, dxs, _is_tensor)
+    else:
+        return _unwrap_output(x, _dx, _is_tensor)
 
 @torch.no_grad()
 def _rk4(
     func: Callable,
     x0: torch.Tensor,
     steps: torch.Tensor,
+    return_trajectory: bool = False,
     return_func_outputs: bool = False,
 ) -> torch.Tensor:
 
@@ -80,17 +87,18 @@ def _rk4(
     x = _to_tuple(x0)
     num_vars = len(x)
     num_steps = len(steps)
-    xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
 
     x = [instance.clone() for instance in x]
     _tmp_tensor = [instance.clone() for instance in x]
 
-    for i in range(num_vars):
-        xs[i][0] = x[i].clone()
+    xs, dxs = None, None
+    if return_trajectory:
+        xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+        for i in range(num_vars):
+            xs[i][0] = x[i].clone()
 
-    dxs = None
-    if return_func_outputs:
-        dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+        if return_func_outputs:
+            dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
 
     for k, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
         dh = h1 - h0
@@ -117,17 +125,22 @@ def _rk4(
             _tmp_tensor[i].div_(6.0)
             x[i].add_(_tmp_tensor[i], alpha=dh)
 
-            xs[i][k].copy_(x[i])
-            if return_func_outputs:
-                dxs[i][k].copy_(_tmp_tensor[i])
+            if return_trajectory:
+                xs[i][k].copy_(x[i])
+                if return_func_outputs:
+                    dxs[i][k].copy_(_tmp_tensor[i])
 
-    return _unwrap_output(xs, dxs, _is_tensor)
+    if return_trajectory:
+        return _unwrap_output(xs, dxs, _is_tensor)
+    else:
+        return _unwrap_output(x, _tmp_tensor, _is_tensor)
 
 @torch.no_grad()
 def _heun2(
     func: Callable,
     x0: torch.Tensor,
     steps: torch.Tensor,
+    return_trajectory: bool = False,
     return_func_outputs: bool = False,
 ) -> torch.Tensor:
 
@@ -135,17 +148,18 @@ def _heun2(
     x = _to_tuple(x0)
     num_vars = len(x)
     num_steps = len(steps)
-    xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
 
     x = [instance.clone() for instance in x]
     _tmp_tensor = [instance.clone() for instance in x]
 
-    for i in range(num_vars):
-        xs[i][0] = x[i].clone()
+    xs, dxs = None, None
+    if return_trajectory:
+        xs = [torch.empty(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+        for i in range(num_vars):
+            xs[i][0] = x[i].clone()
 
-    dxs = None
-    if return_func_outputs:
-        dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
+        if return_func_outputs:
+            dxs = [torch.zeros(num_steps, *x[i].shape, device=x[i].device, dtype=x[i].dtype) for i in range(num_vars)]
 
     for k, (h0, h1) in enumerate(zip(steps[:-1], steps[1:]), start=1):
         dh = h1 - h0
@@ -162,25 +176,30 @@ def _heun2(
             _tmp_tensor[i].mul_(0.5)
             x[i].add_(_tmp_tensor[i], alpha=dh)
 
-            xs[i][k].copy_(x[i])
-            if return_func_outputs:
-                dxs[i][k].copy_(_tmp_tensor[i])
+            if return_trajectory:
+                xs[i][k].copy_(x[i])
+                if return_func_outputs:
+                    dxs[i][k].copy_(_tmp_tensor[i])
 
-    return _unwrap_output(xs, dxs, _is_tensor)
+    if return_trajectory:
+        return _unwrap_output(xs, dxs, _is_tensor)
+    else:
+        return _unwrap_output(x, _tmp_tensor, _is_tensor)
 
 def odeint(
     func: Callable,
     x0: torch.Tensor,
     steps: torch.Tensor,
-    method: Optional[str] = 'euler',
-    return_func_outputs: Optional[bool] = False,
+    method: str = 'euler',
+    return_trajectory: bool = False,
+    return_func_outputs: bool = False,
 ) -> torch.Tensor:
 
     if method == "euler":
-        return _euler_explicit(func, x0, steps, return_func_outputs)
+        return _euler_explicit(func, x0, steps, return_trajectory, return_func_outputs)
     if method == "heun2":
-        return _heun2(func, x0, steps, return_func_outputs)
+        return _heun2(func, x0, steps, return_trajectory, return_func_outputs)
     elif method == "rk4":
-        return _rk4(func, x0, steps, return_func_outputs)
+        return _rk4(func, x0, steps, return_trajectory, return_func_outputs)
     else:
         raise ValueError("Method does not exist")

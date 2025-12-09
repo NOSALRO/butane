@@ -55,6 +55,7 @@ class FlowMatching(torch.nn.Module):
         method: str = 'euler',
         reverse: bool = False,
         return_model_outputs: bool = False,
+        edm_time_grid: bool = False,
         batch_size: int = 128,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
@@ -73,7 +74,7 @@ class FlowMatching(torch.nn.Module):
                 return c.repeat_interleave(repeats, dim=0)
             return c
 
-        model.to()
+        model.to(_device)
         x0 = x0.to(_device)
         xs, vs = [], []
         n_generations = 1
@@ -83,12 +84,15 @@ class FlowMatching(torch.nn.Module):
         if condition is not None:
             condition = to_device_recursive(condition)
 
-        timesteps = torch.linspace(
-            0. if not reverse else 1.,
-            1. if not reverse else 0.,
-            n_timesteps,
-            device=_device
-        )
+        if edm_time_grid:
+            timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=reverse).to(_device)
+        else:
+            timesteps = torch.linspace(
+                0. if not reverse else 1.,
+                1. if not reverse else 0.,
+                n_timesteps + 1,
+                device=_device
+            )
 
         if multiple_gen_per_condition:
             n_generations, n_conditions = x0.size(0), x0.size(1)
@@ -112,13 +116,20 @@ class FlowMatching(torch.nn.Module):
         current_idx = 0
         for x0_batch, cond_batch in zip(x0_iter, condition_iter):
             batch_n = x0_batch.size(0)
-            x, v = odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method, return_model_outputs)
+            x, v = odeint(
+                func=functools.partial(func, c=cond_batch),
+                x0=x0_batch,
+                steps=timesteps,
+                method=method,
+                return_trajectory=True,
+                return_func_outputs=return_model_outputs
+            )
             # x = torchdiffeq.odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method='explicit_adams')
             # v = torch.zeros_like(x)
             if keep_record:
-                xs[:, current_idx: current_idx + batch_n] = x
+                xs[:, current_idx: current_idx + batch_n] = x[1:]
                 if return_model_outputs:
-                    vs[:, current_idx: current_idx + batch_n] = v
+                    vs[:, current_idx: current_idx + batch_n] = v[1:]
             else:
                 xs[current_idx: current_idx + batch_n] = x[-1]
                 if return_model_outputs:
@@ -232,6 +243,19 @@ class FlowMatching(torch.nn.Module):
             multiple_gen_per_condition=multiple_gen_per_condition,
         )
         return x1, log_likelihood
+
+    @staticmethod
+    def edm_time_grid(n_timesteps: int, r: int = 7, reverse: bool = False):
+        sigma_max = 80.0
+        sigma_min = 0.002
+        r = 7
+        t = torch.arange(0, n_timesteps, dtype=torch.float64) / (n_timesteps - 1)
+        timesteps = (sigma_max ** (1/r) + t * (sigma_min ** (1/r) - sigma_max**(1/r))) ** r
+        timesteps = (timesteps / (1 + timesteps)).squeeze()
+        timesteps = torch.cat([timesteps, torch.full_like(timesteps[:1], t[0])])
+        if not reverse:
+            timesteps = 1 - timesteps.clamp(0., 1.)
+        return timesteps.float()
 
 class ConditionalFlowMatching(FlowMatching):
 
