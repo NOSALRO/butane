@@ -477,7 +477,7 @@ class UNetNd(torch.nn.Module):
                 kernel_size=1,
                 n_heads=self._attention_heads,
                 dropout_p=attention_dropout,
-                prenorm=partial(torch.nn.GroupNorm, num_groups=min(32, 2 ** math.floor(math.log2(_condition_output_size[0])))),
+                prenorm=partial(torch.nn.GroupNorm, num_groups=min(32, 2 ** math.floor(math.log2(self._condition_output_dims[0])))),
                 bias=True,
                 zero_out=zero_conv,
             )
