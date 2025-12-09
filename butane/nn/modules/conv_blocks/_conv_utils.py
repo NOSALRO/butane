@@ -2,7 +2,7 @@ from typing import Optional, Callable
 import torch
 
 
-def define_Nd_convolution(conv_type: str, transpose: Optional[bool] = False) -> Callable[object, object]:
+def define_Nd_convolution(conv_type: str, transpose: Optional[bool] = False) -> Callable:
     def inner(cls):
         if conv_type == '1d':
             if not transpose:

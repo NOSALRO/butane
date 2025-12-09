@@ -60,29 +60,14 @@ class FlowMatching(torch.nn.Module):
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         _device = self._dummy_param.device
-        def to_device_recursive(c):
-            if isinstance(c, (tuple, list)):
-                return type(c)(to_device_recursive(i) for i in c)
-            if isinstance(c, torch.Tensor):
-                return c.to(_device)
-            return c
-
-        def repeat_recursive(c, repeats):
-            if isinstance(c, (tuple, list)):
-                return type(c)(repeat_recursive(i, repeats) for i in c)
-            if isinstance(c, torch.Tensor):
-                return c.repeat_interleave(repeats, dim=0)
-            return c
-
         model.to(_device)
         x0 = x0.to(_device)
-        xs, vs = [], []
         n_generations = 1
         n_conditions = x0.size(0)
         spatial_dims = x0.shape[1:]
 
         if condition is not None:
-            condition = to_device_recursive(condition)
+            condition = self._to_device_recursive(condition, _device)
 
         if edm_time_grid:
             timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=reverse).to(_device)
@@ -99,7 +84,7 @@ class FlowMatching(torch.nn.Module):
             spatial_dims = x0.shape[2:]
             x0 = x0.transpose(0, 1).flatten(0, 1)
             if condition is not None:
-                condition = repeat_recursive(condition, n_generations)
+                condition = self._repeat_recursive(condition, n_generations)
 
         func = lambda t, x, c: model(x, t.expand(x.size(0), 1), c)
 
@@ -121,7 +106,7 @@ class FlowMatching(torch.nn.Module):
                 x0=x0_batch,
                 steps=timesteps,
                 method=method,
-                return_trajectory=True,
+                return_trajectory=keep_record,
                 return_func_outputs=return_model_outputs
             )
             # x = torchdiffeq.odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method='explicit_adams')
@@ -131,9 +116,9 @@ class FlowMatching(torch.nn.Module):
                 if return_model_outputs:
                     vs[:, current_idx: current_idx + batch_n] = v[1:]
             else:
-                xs[current_idx: current_idx + batch_n] = x[-1]
+                xs[current_idx: current_idx + batch_n] = x
                 if return_model_outputs:
-                    vs[current_idx: current_idx + batch_n] = v[-1]
+                    vs[current_idx: current_idx + batch_n] = v
             current_idx += batch_n
 
         def _revert_shape(x: torch.Tensor):
@@ -163,55 +148,121 @@ class FlowMatching(torch.nn.Module):
         condition: Optional[torch.Tensor] = None,
         keep_record: bool = False,
         multiple_gen_per_condition: bool = False,
+        edm_time_grid: bool = False,
         method: str = 'euler',
+        batch_size: int = 128,
     ) -> torch.Tensor:
 
-        z = (torch.randn_like(x1).to(x1.device) < 0) * 2.0 - 1.0
-        def func(t, x, c):
-            x = x[0]
-            with torch.set_grad_enabled(True):
-                x.requires_grad_()
-                ut = model(x, t.repeat(x.size(0)).unsqueeze(-1), c)
-                # div = 0
-                # for i in range(ut.flatten(1).shape[1]):
-                #     div += torch.autograd.grad(outputs=ut[:,i], inputs=x, grad_outputs=torch.ones_like(ut[:,i]).detach(), create_graph=True)[0][:, i]
-                ut_dot_z = torch.einsum(
-                    "ij,ij->i", ut.flatten(start_dim=1), z.flatten(start_dim=1)
-                )
-                grad_ut_dot_z = torch.autograd.grad(outputs=ut_dot_z, inputs=x, grad_outputs=torch.ones_like(ut_dot_z).detach(), create_graph=True)[0]
-                div = torch.einsum(
-                    "ij,ij->i",
-                    grad_ut_dot_z.flatten(start_dim=1),
-                    z.flatten(start_dim=1),
-                )
-                return ut.detach(), div.detach()
+        _device = self._dummy_param.device
+        model.to(_device)
+        x1 = x1.to(_device)
+        n_generations = 1
+        n_conditions = x1.size(0)
+        spatial_dims = x1.shape[1:]
 
         if condition is not None:
-            condition = condition.to(self._dummy_param.device)
+            condition = self._to_device_recursive(condition, _device)
 
-        if not multiple_gen_per_condition:
-            x1 = x1.unsqueeze(0)
+        if multiple_gen_per_condition:
+            n_generations, n_conditions = x1.size(0), x1.size(1)
+            spatial_dims = x1.shape[2:]
+            x1 = x1.transpose(0, 1).flatten(0, 1)
+            if condition is not None:
+                condition = self._repeat_recursive(condition, n_generations)
 
-        if keep_record:
-            generated_samples = torch.empty(x1.size(0), n_timesteps, *x1.size()[1:])
+        z = (torch.randn_like(x1).to(_device) < 0) * 2.0 - 1.0
+        if edm_time_grid:
+            timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=True).to(_device)
         else:
-            generated_samples = torch.empty_like(x1)
-        log_likelihoods = torch.empty(*x1.size()[:2])
+            timesteps = torch.linspace(1, 0, n_timesteps + 1, device=_device)
 
-        timesteps = torch.linspace(1., 0., n_timesteps).to(self._dummy_param.device)
-        x1 = x1.to(self._dummy_param.device)
+        x1_iter = batching(x1, batch_size, dim=0)
+        z_iter  = batching(z,  batch_size, dim=0) # Batch z synchronously
 
-        for i, _x1 in enumerate(x1):
-            sols, log_det, _ = odeint(functools.partial(func, c=condition), (_x1, torch.zeros(_x1.size(0), device=_x1.device)), timesteps, method=method)
-            x0 = sols[-1].cpu()
-            log_p0 = self.__source_distribution.log_prob(x0).to(self._dummy_param.device)
-            log_det = log_p0 + log_det[-1]
+        if condition is not None:
+            condition_iter = batching(condition, batch_size, dim=0)
+        else:
+            condition_iter = itertools.repeat(None)
 
-            sols = sols[None,...] if keep_record else sols[-1][None,...]
-            log_det = log_det[None,...]
-            generated_samples[i] = sols
-            log_likelihoods[i] = log_det
-        return generated_samples.squeeze(0), log_likelihoods.squeeze(0)
+        out_shape = (n_timesteps, x1.size(0), *spatial_dims) if keep_record else (x1.size(0), *spatial_dims)
+        xs = torch.empty(out_shape, device=_device, dtype=x1.dtype)
+        lls = torch.empty(x1.size(0), device=_device, dtype=x1.dtype)
+
+        current_idx = 0
+
+        for x1_batch, z_batch, cond_batch in zip(x1_iter, z_iter, condition_iter):
+            batch_n = x1_batch.size(0)
+
+            def func(t, x, c):
+                 x_val = x[0]
+                 with torch.set_grad_enabled(True):
+                     x_val.requires_grad_()
+
+                     t_in = t.repeat(x_val.size(0)).unsqueeze(-1) if t.ndim == 0 else t
+                     ut = model(x_val, t_in, c)
+
+                     # Hutchinson's Trace Estimator
+                     ut_dot_z = torch.einsum("ij,ij->i", ut.flatten(1), z.flatten(1))
+                     grad_ut_dot_z = torch.autograd.grad(
+                         outputs=ut_dot_z, inputs=x_val, 
+                         grad_outputs=torch.ones_like(ut_dot_z), 
+                         create_graph=True
+                     )[0]
+                     div = torch.einsum("ij,ij->i", grad_ut_dot_z.flatten(1), z.flatten(1))
+                     return ut.detach(), div.detach()
+
+
+            init_state = (x1_batch, torch.zeros(batch_n, device=_device))
+
+            # Returns: ((x_traj, logdet_traj), dx_traj)
+            traj, _ = odeint(
+                functools.partial(func, c=cond_batch),
+                init_state,
+                timesteps,
+                method=method,
+                return_trajectory=True
+            )
+
+            x_traj, logdet_traj = traj
+
+            if keep_record:
+                xs[:, current_idx : current_idx + batch_n] = x_traj[1:]
+            else:
+                xs[current_idx : current_idx + batch_n] = x_traj[-1]
+
+
+            x0_final = x_traj[-1]
+            delta_logp = logdet_traj[-1]
+
+            log_p0 = self.__source_distribution.log_prob(x0_final.cpu()).to(_device)
+            log_p0 = log_p0.flatten()
+            total_ll = log_p0 + delta_logp
+
+            lls[current_idx : current_idx + batch_n] = total_ll
+
+            current_idx += batch_n
+
+        def _revert_shape(x: torch.Tensor, is_ll: bool = False):
+            if is_ll:
+                return x.view(
+                    n_conditions,
+                    n_generations if multiple_gen_per_condition else 1
+                ).movedim((0, 1), (1, 0))
+
+            return x.view(
+                n_timesteps if keep_record else 1,
+                n_conditions,
+                n_generations if multiple_gen_per_condition else 1,
+                *spatial_dims,
+            ).movedim((0, 1, 2), (1, 2, 0)).squeeze(1)
+
+        xs = _revert_shape(xs, is_ll=False)
+        lls = _revert_shape(lls, is_ll=True)
+        if not multiple_gen_per_condition:
+            xs = xs.squeeze(0)
+            lls = lls.squeeze(0)
+
+        return xs, lls
 
     @torch.no_grad()
     def log_likelihood(
@@ -219,8 +270,10 @@ class FlowMatching(torch.nn.Module):
         model: torch.nn.Module,
         x0: torch.Tensor,
         n_timesteps: int,
+        monte_carlo_estiamtes: int = 5,
         condition: Optional[torch.Tensor] = None,
         multiple_gen_per_condition: bool = False,
+        edm_time_grid: bool = False,
         method: str = 'euler',
     ) -> torch.Tensor:
 
@@ -233,16 +286,24 @@ class FlowMatching(torch.nn.Module):
             multiple_gen_per_condition=multiple_gen_per_condition,
             method=method,
             return_model_outputs=False,
+            edm_time_grid=edm_time_grid,
         )
-        _, log_likelihood = self.flow_likelihood(
-            model=model,
-            x1=x1.to(self._dummy_param.device),
-            n_timesteps=n_timesteps,
-            condition=condition,
-            keep_record=False,
-            multiple_gen_per_condition=multiple_gen_per_condition,
-        )
-        return x1, log_likelihood
+
+        monte_carlo_lls = []
+        for _ in range(monte_carlo_estiamtes):
+            _, log_likelihood = self.flow_likelihood(
+                model=model,
+                x1=x1,
+                n_timesteps=n_timesteps,
+                condition=condition,
+                keep_record=False,
+                multiple_gen_per_condition=multiple_gen_per_condition,
+                edm_time_grid=edm_time_grid,
+            )
+            monte_carlo_lls.append(log_likelihood)
+        monte_carlo_lls = torch.stack(monte_carlo_lls)
+        log_likelihood_estimate = monte_carlo_lls.mean(0)
+        return x1, log_likelihood_estimate
 
     @staticmethod
     def edm_time_grid(n_timesteps: int, r: int = 7, reverse: bool = False):
@@ -256,6 +317,29 @@ class FlowMatching(torch.nn.Module):
         if not reverse:
             timesteps = 1 - timesteps.clamp(0., 1.)
         return timesteps.float()
+
+    @staticmethod
+    def _to_device_recursive(
+        x: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]],
+        device
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
+        if isinstance(x, (tuple, list)):
+            return type(x)(FlowMatching._to_device_recursive(i) for i in x)
+        if isinstance(x, torch.Tensor):
+            return x.to(device)
+        return x
+
+    @staticmethod
+    def _repeat_recursive(
+        x: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]],
+        n_repeats: int,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
+        if isinstance(x, (tuple, list)):
+            return type(x)(FlowMatching._repeat_recursive(i, n_repeats) for i in x)
+        if isinstance(x, torch.Tensor):
+            return x.repeat_interleave(n_repeats, dim=0)
+        return x
+
 
 class ConditionalFlowMatching(FlowMatching):
 
