@@ -17,8 +17,8 @@ class ModelTrainer:
     def __call__(
         self,
         epochs: int,
-        loss_fn: Optional[Callable[[torch.Tensor, ...], Tuple[torch.Tensor,...]]],
-        eval_period: Optional[int] = 0,
+        loss_fn: Callable,
+        eval_period: int = 0,
         eval_dl: Optional[torch.utils.data.DataLoader] = None
     ) -> None:
         for epoch in range(epochs):
@@ -27,7 +27,7 @@ class ModelTrainer:
             if eval_period and eval_dl and not ((epoch + 1) % eval_period):
                 eval(eval_dl.value(), loss)
 
-    def eval(eval_dl: torch.utils.data.DataLoader, loss_fn: Optional[Callable[[torch.Tensor, ...], Tuple[torch.Tensor,...]]]) -> None:
+    def eval(eval_dl: torch.utils.data.DataLoader, loss_fn: Callable) -> None:
         self.model.eval()
         print("Evaluation -> ", end='')
         self.model.step(eval_dl, self.optimizer, loss_fn, self.scheduler)

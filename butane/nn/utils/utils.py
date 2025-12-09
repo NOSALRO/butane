@@ -1,4 +1,4 @@
-from typing import TypeAlias, Union, Optional, List, Tuple, Callable
+from typing import Union, Optional, List, Tuple, Callable
 import os
 import torch
 from ..._typedefs import *

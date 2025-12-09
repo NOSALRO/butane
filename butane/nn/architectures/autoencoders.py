@@ -27,7 +27,7 @@ class AE(torch.nn.Module):
         self,
         dl: torch.utils.data.DataLoader,
         optimizer: torch.optim.Optimizer,
-        loss_fn_: Optional[Callable[[torch.Tensor, ...], Tuple[torch.Tensor,...]]] = loss_fn,
+        loss_fn_: Callable = loss_fn,
         scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
     ) -> None:
         sum_loss = 0.
@@ -78,7 +78,7 @@ class VQVAE(AE):
         self,
         dl: torch.utils.data.DataLoader,
         optimizer: torch.optim.Optimizer,
-        loss_fn_: Optional[Callable[[torch.Tensor, ...], Tuple[torch.Tensor,...]]] = loss_fn,
+        loss_fn_: Callable = loss_fn,
         scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
     ) -> None:
         sum_loss = 0.
@@ -132,7 +132,7 @@ class MLVQVAE(VQVAE):
         self,
         dl: torch.utils.data.DataLoader,
         optimizer: torch.optim.Optimizer,
-        loss_fn_: Optional[Callable[[torch.Tensor, ...], Tuple[torch.Tensor,...]]] = loss_fn,
+        loss_fn_: Callable = loss_fn,
         scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
     ) -> None:
         sum_loss = 0.

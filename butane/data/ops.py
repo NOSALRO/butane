@@ -73,7 +73,7 @@ def drop_to_max_size(
             X.targets = targets
     return data, targets
 
-def bagging(dataset: butane.data.Dataset, n_learners: int) -> list[butane.data.Dataset,...]:
+def bagging(dataset: butane.data.Dataset, n_learners: int) -> List[butane.data.Dataset]:
     indexes = torch.randperm(dataset.data.size(0))
     chunks = torch.chunk(indexes, n_learners)
     _bagged_datasets = []

@@ -1,16 +1,16 @@
 import torch
-from typing import TypeAlias, Union, Optional
+from typing import Union, Optional, List, Tuple
 
-IntParams: TypeAlias = Union[list[int], tuple[int, ...]]
-FloatParams: TypeAlias = Union[list[float], tuple[float, ...]]
-BoolParams: TypeAlias = Union[bool, list[bool], tuple[bool, ...]]
-StrParams: TypeAlias = Union[str, list[str], tuple[str, ...]]
-ModuleParams: TypeAlias = Union[list[torch.nn.Module], tuple[torch.nn.Module, ...]]
-Description: TypeAlias = Union[list[tuple[int, torch.nn.Module]], tuple[tuple[int, torch.nn.Module], ...]]
-Architecture: TypeAlias = Union[list[tuple[torch.nn.Module, torch.nn.Module]], tuple[tuple[torch.nn.Module, torch.nn.Module], ...]]
+IntParams = Union[List[int], Tuple[int, ...]]
+FloatParams = Union[List[float], Tuple[float, ...]]
+BoolParams = Union[bool, List[bool], Tuple[bool, ...]]
+StrParams = Union[str, List[str], Tuple[str, ...]]
+ModuleParams = Union[List[torch.nn.Module], Tuple[torch.nn.Module, ...]]
+Description = Union[List[Tuple[int, torch.nn.Module]], Tuple[Tuple[int, torch.nn.Module], ...]]
+Architecture = Union[List[Tuple[torch.nn.Module, torch.nn.Module]], Tuple[Tuple[torch.nn.Module, torch.nn.Module], ...]]
 
-NestedIntParams: TypeAlias = Union[list[list[int]], tuple[tuple[int, ...], ...]]
-NestedFloatParams: TypeAlias = Union[list[list[float]], tuple[tuple[float, ...], ...]]
-NestedBoolParams: TypeAlias = Union[bool, list[list[bool]], tuple[tuple[bool, ...], ...]]
-NestedStrParams: TypeAlias = Union[str, list[list[str]], tuple[tuple[str, ...], ...]]
-NestedModuleParams: TypeAlias = Union[list[list[torch.nn.Module]], tuple[tuple[torch.nn.Module, ...], ...]]
+NestedIntParams = Union[List[List[int]], Tuple[Tuple[int, ...], ...]]
+NestedFloatParams = Union[List[List[float]], Tuple[Tuple[float, ...], ...]]
+NestedBoolParams = Union[bool, List[List[bool]], Tuple[Tuple[bool, ...], ...]]
+NestedStrParams = Union[str, List[List[str]], Tuple[Tuple[str, ...], ...]]
+NestedModuleParams = Union[List[List[torch.nn.Module]], Tuple[Tuple[torch.nn.Module, ...], ...]]
