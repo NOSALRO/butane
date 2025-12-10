@@ -31,14 +31,41 @@ def compute_grad_norm(model: torch.nn.Module) -> torch.Tensor:
     device = grads[0].device
     return torch.norm(torch.stack([torch.norm(g, 2.0).to(device) for g in grads]), 2.0)
 
-def calculate_output_size(*modules, input_dims: IntParams) -> torch.Tensor:
-    _input = torch.randn(1, *input_dims)
-    out_sz = None
+def calculate_output_size(*modules, input_dims: Union[Tuple[IntParams, ...], List[IntParams]]) -> torch.Tensor:
+    _input = []
+
+    if isinstance(input_dims[0], (tuple, list)):
+        for inpd in input_dims:
+            _input.append(torch.randn(1, *inpd))
+    elif isinstance(input_dims[0], (int, torch.Tensor)):
+        _input.append(torch.randn(1, *input_dims))
+
     for module in modules:
+
         if hasattr(module, 'output_size'):
-            _input = torch.randn(1, *module.output_size)
+            _input = []
+            if isinstance(module.output_size, (list, tuple)) and \
+               len(module.output_size) > 0 and \
+               isinstance(module.output_size[0], (list, tuple)):
+                for mos in module.output_size:
+                    _input.append(torch.randn(1, *mos))
+            else:
+                _input.append(torch.randn(1, *module.output_size))
             continue
-        _input = module(_input)
+
+        if isinstance(_input, (list, tuple)):
+            try:
+                _input = module(*_input)
+            except TypeError:
+                _input = module(_input)
+        else:
+            _input = module(_input)
+
+    if isinstance(_input, (list, tuple)):
+        output_size = []
+        for _i in _input:
+            output_size.append(torch.tensor(_i.size())[1:])
+        return output_size
     return torch.tensor(_input.size())[1:]
 
 @torch.no_grad()
