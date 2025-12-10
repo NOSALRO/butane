@@ -341,7 +341,7 @@ class UNetNd(torch.nn.Module):
         condition_add: bool = False,
         condition_projection: bool = False,
         condition_cross_attention: bool = False,
-        condition_input_dims: Optional[IntParams] = None,
+        condition_input_dims: Optional[Union[IntParams, Tuple[IntParams, ...], List[IntParams]]] = None,
         condition_concat_projection: bool = False,
         condition_dropout: float = 0.,
         condition_n_residuals: int = 2,
@@ -379,7 +379,7 @@ class UNetNd(torch.nn.Module):
 
         assert not (self._condition_concat and self._condition_add), "Condition concat and add cannot be enabled together; Please use one."
 
-        if self._condition_projection or self._condition_cross_attention:
+        if self._condition_projection or self._condition_cross_attention and condition_projection_module is None:
             if self._condition_concat and not len(self._condition_input_dims) == len(self._input_dims):
                 self._condition_concat = False
                 warnings.warn("Concat condition is disabled; Concat condition can not be used with conditions of different modalities", UserWarning)
@@ -451,8 +451,8 @@ class UNetNd(torch.nn.Module):
                     linear_projection=not self._condition_cross_attention,
                 )
             else:
-                self.condition_projection_block = torch.nn.Sequential(condition_projection_module)
-                _condition_module_output_dims = utils.calculate_output_size(self.condition_projection, input_dims=self._condition_input_dims)
+                self.condition_projection_block = XDependentSequential(condition_projection_module)
+                _condition_module_output_dims = utils.calculate_output_size(self.condition_projection_block, input_dims=self._condition_input_dims)
                 if not self._condition_cross_attention:
                     _projector = MLPBlock(
                         input_dims=_condition_module_output_dims.prod().int(),
@@ -650,8 +650,11 @@ class UNetNd(torch.nn.Module):
         c_spatial, c_latent = None, None
 
         if c is not None:
-            if isinstance(c, tuple):
+            if isinstance(c, tuple) and not isinstance(c[0], tuple):
                 c_spatial, c_latent = c
+            elif isinstance(c, tuple) and isinstance(c[0], tuple):
+                c_spatial = c[0]
+                c_latent = c[1] if len(c) == 2 else None
 
             elif (self._condition_output_dims is not None and
                   tuple(self._condition_output_dims) == tuple(c.shape[1:]) and
@@ -676,7 +679,7 @@ class UNetNd(torch.nn.Module):
                 warnings.warn("Condition bypassed projection.", RuntimeWarning)
                 c_emb = c_latent
             else:
-                c_emb = self.condition_projection_block(c_spatial)
+                c_emb = self.condition_projection_block(*c_spatial if not isinstance(c_spatial, torch.Tensor) else c_spatial)
             if emb is None:
                 emb = c_emb
             else:
@@ -705,17 +708,13 @@ class UNetNd(torch.nn.Module):
                 raise ValueError("Model requires both Reference and Class. Provide c as tuple: (Reference, Label)")
             if isinstance(c[0], torch.Tensor) and c[0].dim() == 1:
                 y, c = c[0], c[1]
-            else:
+            elif isinstance(c[1], torch.Tensor) and c[1].dim() == 1:
                 c, y = c[0], c[1]
         elif not self._condition_projection and self._n_classes is not None:
             # Case: Class Only (c is interpreted as label y)
             if isinstance(c, tuple):
                  raise ValueError("Model requires Class only, but tuple provided.")
             y, c = c, None
-        # elif self._condition_projection and self._n_classes is None:
-        #      # Case: Reference Only
-        #      if isinstance(c, tuple):
-        #          raise ValueError("Model requires Reference only, but tuple provided.")
 
         x, emb, c_emb = self.prepare_conditioning(x, t, c=c, y=y)
         return self._forward(x, emb, c_emb)
