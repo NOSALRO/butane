@@ -54,7 +54,7 @@ class TimeMLP(torch.nn.Module):
         self._time_embedding_size = time_embedding_size
         self._n_classes = n_classes
         self._class_drop_prob = class_drop_prob
-        self._has_condition = (n_classes is not None or condition_input_dims is not None) and (condition_projection or condition_concat)
+        self._has_condition = (n_classes is not None or condition_input_dims is not None) and (condition_projection or condition_concat or self._simplified)
 
         self._internal_dim = None
         if not self._simplified:
@@ -222,7 +222,8 @@ class TimeMLP(torch.nn.Module):
         elif c is not None:
             if self._simplified:
                 c_parts = apply_recursively(c, lambda x: x.flatten(1))
-                if c_parts: c_emb = torch.cat(c_parts, dim=-1)
+                if c_parts is not None: 
+                    c_emb = torch.cat(c_parts, dim=-1) if not isinstance(c_parts, torch.Tensor) else c_parts
             else:
                 if self._condition_projection:
                     if isinstance(c, dict): c_emb = self.condition_projection_block(c)

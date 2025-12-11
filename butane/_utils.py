@@ -8,10 +8,12 @@ def apply_recursively(
 ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
     if isinstance(x, (tuple, list)):
         return type(x)(apply_recursively(i, func) for i in x)
-    if isinstance(x, dict):
+    elif isinstance(x, dict):
         return {k: apply_recursively(v, func) for k, v in x.items()}
-    if isinstance(x, torch.Tensor):
+    elif isinstance(x, torch.Tensor):
         return func(x)
+    else:
+        return None
     return x
 
 def batching(
