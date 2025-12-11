@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Union, Tuple, List
+from typing import Callable, Optional, Union, Tuple, List, Dict
 import warnings
 from functools import partial
 import copy
@@ -379,22 +379,70 @@ class UNetNd(torch.nn.Module):
 
         assert not (self._condition_concat and self._condition_add), "Condition concat and add cannot be enabled together; Please use one."
 
-        if self._condition_projection or self._condition_cross_attention and condition_projection_module is None:
-            if self._condition_concat and not len(self._condition_input_dims) == len(self._input_dims):
+        spatial_match = lambda s1, s2: tuple(s1[1:]) == tuple(s2[1:])
+        full_match = lambda s1, s2: tuple(s1) == tuple(s2)
+
+        if (self._condition_projection or self._condition_cross_attention) and condition_projection_module is None:
+            is_multi_modal = False
+            if isinstance(self._condition_input_dims, dict):
+                is_multi_modal = True
+            elif isinstance(self._condition_input_dims, (list, tuple)) and len(self._condition_input_dims) > 0 and isinstance(self._condition_input_dims[0], (list, tuple)):
+                is_multi_modal = True
+            if is_multi_modal:
+                 raise ValueError("Default projection blocks do not support multi-modal (Dict/List) input dimensions. "
+                                  "Please provide a custom 'condition_projection_module' to handle this input.")
+
+            if self._condition_concat and len(self._condition_input_dims) != len(self._input_dims):
                 self._condition_concat = False
-                warnings.warn("Concat condition is disabled; Concat condition can not be used with conditions of different modalities", UserWarning)
+                warnings.warn("Concat condition is disabled; Concat condition can not be used with conditions of different modalities (different rank).", UserWarning)
+
             if len(self._condition_input_dims) == 2:
                 self.condition_block = ConditionProjectionBlock1d
             elif len(self._condition_input_dims) == 3:
                 self.condition_block = ConditionProjectionBlock2d
             elif len(self._condition_input_dims) == 4:
                 self.condition_block = ConditionProjectionBlock3d
-        elif len(self._condition_input_dims) != len(self._input_dims) and not self._condition_projection:
-            raise ValueError("For different modalities of condition and input, condition projection should be on")
+
+        elif not self._condition_projection and condition_projection_module is None:
+            is_compatible = True
+            if self._condition_concat:
+                if isinstance(self._condition_input_dims, dict):
+                    is_compatible = any(spatial_match(v, self._input_dims) for v in self._condition_input_dims.values())
+                elif isinstance(self._condition_input_dims, (list, tuple)) and isinstance(self._condition_input_dims[0], (list, tuple)):
+                    is_compatible = any(spatial_match(v, self._input_dims) for v in self._condition_input_dims)
+                else:
+                    is_compatible = spatial_match(self._condition_input_dims, self._input_dims)
+            elif self._condition_add:
+                if isinstance(self._condition_input_dims, dict):
+                    is_compatible = any(full_match(v, self._input_dims) for v in self._condition_input_dims.values())
+                elif isinstance(self._condition_input_dims, (list, tuple)) and isinstance(self._condition_input_dims[0], (list, tuple)):
+                    is_compatible = any(full_match(v, self._input_dims) for v in self._condition_input_dims)
+                else:
+                    is_compatible = full_match(self._condition_input_dims, self._input_dims)
+
+            if not is_compatible:
+                op = "concatenate" if self._condition_concat else "add"
+                raise ValueError(f"Condition projection is OFF, but no condition input matches the input dimensions. "
+                                  f"Cannot {op} incompatible shapes without projection. "
+                                  f"Input: {self._input_dims}, Condition Config: {self._condition_input_dims}")
 
 
         if self._condition_concat:
-            self._input_dims[0] += self._condition_input_dims[0]
+            extra_channels = 0
+
+            if isinstance(self._condition_input_dims, dict):
+                for shape in self._condition_input_dims.values():
+                    if spatial_match(shape, self._input_dims): extra_channels += shape[0]
+            elif isinstance(self._condition_input_dims, (list, tuple)) and isinstance(self._condition_input_dims[0], (list, tuple)):
+                for shape in self._condition_input_dims:
+                    if spatial_match(shape, self._input_dims): extra_channels += shape[0]
+            else:
+                shape = self._condition_input_dims
+                if spatial_match(shape, self._input_dims): extra_channels += shape[0]
+                else:
+                    warnings.warn(f"condition_concat=True but condition shape {shape} does not match input spatial dims {self._input_dims[1:]}. Nothing will be concatenated.", UserWarning)
+
+            self._input_dims[0] += extra_channels
 
         self._attention = attention
         self._attention_heads = attention_heads
@@ -612,31 +660,27 @@ class UNetNd(torch.nn.Module):
 
         self.summary()
 
-    def prepare_conditioning(
-        self,
-        x: torch.Tensor,
-        t: Optional[torch.Tensor] = None,
-        c: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]] = None, # Reference
-        y: Optional[torch.Tensor] = None, # Class
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
-        emb, c_emb = None, None
+    def _prepare_time(self, t: Optional[torch.Tensor] = None) -> torch.Tensor:
+        emb = None
         if t is not None:
             assert self._time_dependent, "Time dependency is not enabled, but time was provided"
             emb = self.time_embedder(t)
             emb = self.embedding_projection(emb)
+        return emb
 
-        has_condition_inputs = (c is not None) or (y is not None)
-        if self._has_condition and not has_condition_inputs:
-            raise ValueError("Conditioning is enabled but no condition (c or y) was provided.")
-        elif not self._has_condition and has_condition_inputs:
-            raise ValueError("Conditioning is disabled, but conditions were provided.")
-
+    def _prepare_labels(
+        self,
+        emb: Optional[torch.Tensor],
+        y: Optional[torch.Tensor],
+        batch_size: int,
+        device: torch.device,
+    ) -> torch.Tensor:
         if self._n_classes is not None:
             if y is None:
-                # Classifier free guidance.
+                # Classifier-Free Guidance (CFG): Unconditional generation
+                # If training with dropout > 0, or inference with no label, we use the NULL token.
                 if self._class_drop_prob > 0:
-                    y = torch.full((x.shape[0],), self._null_class_idx, device=x.device, dtype=torch.long)
+                    y = torch.full((batch_size,), self._null_class_idx, device=device, dtype=torch.long)
                 else:
                      raise ValueError(f"Model requires {self._n_classes} class labels, but `y` is None.")
             else:
@@ -644,79 +688,107 @@ class UNetNd(torch.nn.Module):
                 if self.training and self._class_drop_prob > 0:
                     drop_mask = torch.bernoulli(torch.full(y.shape, self._class_drop_prob, device=y.device)).bool()
                     y = torch.where(drop_mask, self._null_class_idx, y)
-                y_emb = self.class_embedder(y)
-                emb = emb + y_emb if emb is not None else y_emb
+            y_emb = self.class_embedder(y)
+            emb = emb + y_emb if emb is not None else y_emb
+        return emb
 
-        c_spatial, c_latent = None, None
+    def prepare_conditioning(
+        self,
+        x: torch.Tensor,
+        t: Optional[torch.Tensor] = None,
+        c: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]] = None, # Reference
+        y: Optional[torch.Tensor] = None, # Class
+        z: Optional[torch.Tensor] = None, # Condition Projection
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
-        if c is not None:
-            if isinstance(c, tuple) and not isinstance(c[0], tuple):
-                c_spatial, c_latent = c
-            elif isinstance(c, tuple) and isinstance(c[0], tuple):
-                c_spatial = c[0]
-                c_latent = c[1] if len(c) == 2 else None
+        has_condition_inputs = (c is not None) or (y is not None) or (z is not None)
+        is_unconditional_valid = (self._n_classes is not None and self._class_drop_prob > 0)
 
-            elif (self._condition_output_dims is not None and
-                  tuple(self._condition_output_dims) == tuple(c.shape[1:]) and
-                  self._bypass_capable):
-                c_latent = c
-                if self._condition_concat or self._condition_add:
-                    C_cond = self._condition_input_dims[0]
-                    c_spatial = torch.zeros(x.size(0), C_cond, *x.shape[2:], device=x.device, dtype=x.dtype)
-                    warnings.warn(("Condition projection bypass detected,"
-                                  "and condition for concatination or addition is not detected;"
-                                  "Creating condition of zeros."), RuntimeWarning)
-            else:
-                c_spatial = c
+        if self._has_condition and not has_condition_inputs and not is_unconditional_valid:
+             raise ValueError("Conditioning is enabled but no condition (conditions, labels, or projections) was provided.")
+        elif not self._has_condition and has_condition_inputs:
+            raise ValueError("Conditioning is disabled, but conditions were provided.")
+
+        if isinstance(c, dict) and isinstance(self._condition_input_dims, dict):
+            missing_keys = [k for k in self._condition_input_dims.keys() if k not in c]
+            if missing_keys:
+                raise KeyError(f"Condition input is missing required keys defined in 'condition_input_dims'. Missing: {missing_keys}")
+
+        emb = self._prepare_time(t=t)
+        emb = self._prepare_labels(emb=emb, y=y, batch_size=x.shape[0], device=x.device)
+        c_emb = None
 
         if self._condition_concat or self._condition_add:
-            if c is None:
-                raise ValueError("Concat conditioning enabled, but reference `c` is None.")
-            x = torch.cat([x, c_spatial], dim=1) if self._condition_concat else x + c_spatial
+            compatible = lambda t1, t2: (t1.ndim == t2.ndim and t1.shape[2:] == t2.shape[2:] and not self._condition_add) \
+                    or (t1.ndim == t2.ndim and t1.shape[1:] == t2.shape[1:])
+
+            if isinstance(c, torch.Tensor):
+                if compatible(x, c):
+                    x = torch.cat([x, c], dim=1) if self._condition_concat else x + c
+
+            elif isinstance(c, (tuple, list)):
+                for ci in c:
+                    if compatible(x, ci):
+                        x = torch.cat([x, ci], dim=1) if self._condition_concat else x + ci
+
+            elif isinstance(c, dict):
+                for vi in c.values():
+                    if isinstance(vi, torch.Tensor) and compatible(vi, x):
+                        x = torch.cat([x, vi], dim=1) if self._condition_concat else x + vi
 
         if (self._condition_projection or self._condition_cross_attention):
-            if c_latent is not None:
-                warnings.warn("Condition bypassed projection.", RuntimeWarning)
-                c_emb = c_latent
-            else:
-                c_emb = self.condition_projection_block(*c_spatial if not isinstance(c_spatial, torch.Tensor) else c_spatial)
-            if emb is None:
-                emb = c_emb
-            else:
-                if self._condition_cross_attention:
-                    pass
-                elif self._condition_concat_projection:
-                    emb = torch.hstack((emb, c_emb))
-                elif self._use_film:
-                    c_gamma, c_beta = c_emb.chunk(chunks=2, dim=1)
-                    emb = emb * (1 + c_gamma) + c_beta
+            if z is not None:
+                c_emb = z
+            elif z is None:
+                if isinstance(c, dict):
+                    c_emb = self.condition_projection_block(c)
+                elif isinstance(c, (tuple, list)):
+                    c_emb = self.condition_projection_block(*c)
                 else:
-                    emb = emb + c_emb
+                    c_emb = self.condition_projection_block(c)
+
+            if c_emb is not None:
+                if emb is None:
+                    emb = c_emb
+                else:
+                    if self._condition_cross_attention:
+                        pass
+                    elif self._condition_concat_projection:
+                        emb = torch.hstack((emb, c_emb))
+                    elif self._use_film:
+                        c_gamma, c_beta = c_emb.chunk(chunks=2, dim=1)
+                        emb = emb * (1 + c_gamma) + c_beta
+                    else:
+                        emb = emb + c_emb
         return (x, emb, c_emb)
 
     def forward(
         self,
         x: torch.Tensor,
         t: Optional[torch.Tensor] = None,
-        c: Optional[Union[Tuple[torch.Tensor, int], torch.Tensor]] = None,
+        c: Optional[Union[Dict[str, torch.Tensor], torch.Tensor, Tuple]] = None,
     ) -> torch.Tensor:
 
-        y = None
-        if self._condition_projection and self._n_classes is not None:
-            # Case: Both Reference AND Class required
-            if not isinstance(c, tuple) or len(c) != 2:
-                raise ValueError("Model requires both Reference and Class. Provide c as tuple: (Reference, Label)")
-            if isinstance(c[0], torch.Tensor) and c[0].dim() == 1:
-                y, c = c[0], c[1]
-            elif isinstance(c[1], torch.Tensor) and c[1].dim() == 1:
-                c, y = c[0], c[1]
-        elif not self._condition_projection and self._n_classes is not None:
-            # Case: Class Only (c is interpreted as label y)
-            if isinstance(c, tuple):
-                 raise ValueError("Model requires Class only, but tuple provided.")
-            y, c = c, None
+        condition, labels, projection = None, None, None
 
-        x, emb, c_emb = self.prepare_conditioning(x, t, c=c, y=y)
+        if isinstance(c, dict):
+            condition = c.get("condition")
+            labels = c.get("labels")
+            projection = c.get("projection")
+            if condition is None and projection is None and labels is None:
+                condition = c
+
+        elif isinstance(c, tuple):
+            condition = c
+        elif isinstance(c, torch.Tensor):
+            if (self._condition_output_dims is not None and 
+                tuple(c.shape[1:]) == tuple(self._condition_output_dims) and
+                self._bypass_capable):
+                projection = c
+            else:
+                condition = c
+
+        x, emb, c_emb = self.prepare_conditioning(x, t, c=condition, y=labels, z=projection)
         return self._forward(x, emb, c_emb)
 
     def _forward(

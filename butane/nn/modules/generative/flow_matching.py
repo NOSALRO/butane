@@ -325,6 +325,8 @@ class FlowMatching(torch.nn.Module):
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
         if isinstance(x, (tuple, list)):
             return type(x)(FlowMatching._to_device_recursive(i) for i in x)
+        if isinstance(x, dict):
+            return {k: FlowMatching._to_device_recursive(v, device) for k, v in x.items()}
         if isinstance(x, torch.Tensor):
             return x.to(device)
         return x
@@ -336,6 +338,8 @@ class FlowMatching(torch.nn.Module):
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
         if isinstance(x, (tuple, list)):
             return type(x)(FlowMatching._repeat_recursive(i, n_repeats) for i in x)
+        if isinstance(x, dict):
+            return {k: FlowMatching._repeat_recursive(v, n_repeats) for k, v in x.items()}
         if isinstance(x, torch.Tensor):
             return x.repeat_interleave(n_repeats, dim=0)
         return x
