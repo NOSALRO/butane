@@ -1,6 +1,18 @@
-from typing import Optional, Union, Generator, Tuple, List
+from typing import Optional, Union, Generator, Tuple, List, Any, Dict, Callable
 import math as mth
 import torch
+
+def apply_recursively(
+    x: Union[torch.Tensor, Tuple, List, Dict[str, torch.Tensor]],
+    func: Callable
+) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
+    if isinstance(x, (tuple, list)):
+        return type(x)(apply_recursively(i, func) for i in x)
+    if isinstance(x, dict):
+        return {k: apply_recursively(v, func) for k, v in x.items()}
+    if isinstance(x, torch.Tensor):
+        return func(x)
+    return x
 
 def batching(
     x: Union[torch.Tensor, Tuple[torch.Tensor,...], List[torch.Tensor]],
@@ -10,19 +22,38 @@ def batching(
     drop_last: bool = False,
 ) -> Generator[Union[torch.Tensor, Tuple[torch.Tensor,...], List[torch.Tensor]], None, None]:
 
-    if isinstance(x, torch.Tensor):
-        end_step = x.size(dim) if not drop_last else x.size(dim) - (x.size(dim) % batch_size)
+    def get_end_step(data: Any, current_end_step: int) -> int:
+        if isinstance(data, torch.Tensor):
+            size = data.size(dim)
+            end_step = size if not drop_last else size - (size % batch_size)
+            return min(current_end_step, end_step)
+        elif isinstance(data, dict):
+            for v in data.values():
+                current_end_step = get_end_step(v, current_end_step)
+        elif isinstance(data, (list, tuple)):
+            for v in data:
+                current_end_step = get_end_step(v, current_end_step)
+        return current_end_step
 
-        for step in range(0, end_step, batch_size):
-            yield x.index_select(dim, torch.arange(step, min(step + batch_size, x.size(dim)), device=x.device))
-    elif isinstance(x, (tuple, list)):
-        end_step = x[0].size(dim) if not drop_last else x[0].size(dim) - (x[0].size(dim) % batch_size)
-        for xi in x[1:]:
-            end_step = min(xi.size(dim) if not drop_last else xi.size(dim) - (xi.size(dim) % batch_size), end_step)
+    def slice_data(data: Any, start: int, length: int) -> Any:
+        if isinstance(data, torch.Tensor):
+            return data.narrow(dim=dim, start=start, length=length)
+        elif isinstance(data, dict):
+            return {k: slice_data(v, start, length) for k, v in data.items()}
+        elif isinstance(data, tuple):
+            return tuple(slice_data(v, start, length) for v in data)
+        elif isinstance(data, list):
+            return [slice_data(v, start, length) for v in data]
+        return data # Pass through non-tensor data (e.g. None, integers)
 
-        for step in range(0, end_step, batch_size):
-            out = ([xi.index_select(dim, torch.arange(step, min(step + batch_size, end_step), device=xi.device)) for xi in x])
-            yield tuple(out) if isinstance(x, tuple) else out
+    end_step = get_end_step(x, float('inf'))
+    if end_step == float('inf'):
+        return
+
+    end_step = int(end_step)
+    for step in range(0, end_step, batch_size):
+        _len = min(batch_size, end_step - step)
+        yield slice_data(x, step, _len)
 
 def center_mask(
     x: torch.Tensor,
