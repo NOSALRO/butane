@@ -1,4 +1,4 @@
-from typing import Union, Optional, List, Tuple, Callable
+from typing import Union, Optional, List, Tuple, Callable, Dict
 import os
 import torch
 from ..._typedefs import *
@@ -31,29 +31,54 @@ def compute_grad_norm(model: torch.nn.Module) -> torch.Tensor:
     device = grads[0].device
     return torch.norm(torch.stack([torch.norm(g, 2.0).to(device) for g in grads]), 2.0)
 
-def calculate_output_size(*modules, input_dims: Union[Tuple[IntParams, ...], List[IntParams]]) -> torch.Tensor:
-    _input = []
+def calculate_output_size(
+    *modules, 
+    input_dims: Union[IntParams, Tuple[IntParams, ...], List[IntParams], Dict[str, IntParams]]
+) -> torch.Tensor:
+    _input = None
+    if isinstance(input_dims, dict):
+        _input = {k: torch.randn(1, *v) for k, v in input_dims.items()}
+    elif isinstance(input_dims, (list, tuple)) and len(input_dims) > 0 and isinstance(input_dims[0], (list, tuple)):
+        _input = [torch.randn(1, *v) for v in input_dims]
+    elif isinstance(input_dims, (list, tuple)) or isinstance(input_dims, (int, torch.Tensor)):
+        shape = (input_dims,) if isinstance(input_dims, int) else input_dims
+        _input = torch.randn(1, *shape)
 
-    if isinstance(input_dims[0], (tuple, list)):
-        for inpd in input_dims:
-            _input.append(torch.randn(1, *inpd))
-    elif isinstance(input_dims[0], (int, torch.Tensor)):
-        _input.append(torch.randn(1, *input_dims))
-
+    out_sz = None
     for module in modules:
-
+        # 2. Handle 'output_size' bypass attribute
         if hasattr(module, 'output_size'):
             _input = []
             if isinstance(module.output_size, (list, tuple)) and \
                len(module.output_size) > 0 and \
-               isinstance(module.output_size[0], (list, tuple)):
+               isinstance(module.output_size[0], (list, tuple, torch.Tensor)):
                 for mos in module.output_size:
                     _input.append(torch.randn(1, *mos))
             else:
-                _input.append(torch.randn(1, *module.output_size))
+                _input = torch.randn(1, *module.output_size)
             continue
 
-        if isinstance(_input, (list, tuple)):
+        try:
+            param = next(module.parameters())
+            device = param.device
+            dtype = param.dtype
+
+            def move(x):
+                if isinstance(x, torch.Tensor): return x.to(device, dtype=dtype)
+                if isinstance(x, dict): return {k: move(v) for k, v in x.items()}
+                if isinstance(x, (list, tuple)): return type(x)(move(i) for i in x)
+                return x
+            _input = move(_input)
+        except StopIteration:
+            pass
+
+        if isinstance(_input, dict):
+            try:
+                 _input = module(_input)
+            except TypeError:
+                 # Fallback for modules expecting kwargs (forward(x1=..., x2=...))
+                 _input = module(**_input)
+        elif isinstance(_input, (list, tuple)):
             try:
                 _input = module(*_input)
             except TypeError:
