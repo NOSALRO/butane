@@ -221,9 +221,14 @@ class TimeMLP(torch.nn.Module):
             c_emb = z
         elif c is not None:
             if self._simplified:
-                c_parts = apply_recursively(c, lambda x: x.flatten(1))
-                if c_parts is not None: 
-                    c_emb = torch.cat(c_parts, dim=-1) if not isinstance(c_parts, torch.Tensor) else c_parts
+                c_components = apply_recursively(c, lambda x: x.flatten(1))
+                if c_components is not None:
+                    c_emb = torch.cat(
+                        tuple(c_components.values())
+                        if isinstance(c_parts, dict)
+                        else tuple(c_parts),
+                        dim=-1
+                    )
             else:
                 if self._condition_projection:
                     if isinstance(c, dict): c_emb = self.condition_projection_block(c)
