@@ -119,12 +119,14 @@ class TimeMLP(torch.nn.Module):
             self._bypass_capable = True
         else:
             # Advanced Mode: Projection modules
+            self._custom_condition_module = False
             if self._has_condition and self._condition_projection:
                 if condition_projection_module is not None:
                     self.condition_projection_block = XDependentSequential(condition_projection_module)
                     # Calculate output size
                     out_shape = utils.calculate_output_size(self.condition_projection_block, input_dims=self._condition_input_dims)
                     self._condition_output_dim = torch.tensor(out_shape).prod().item()
+                    self._custom_condition_module = True
                     
                     if raw_cond_size == self._condition_output_dim:
                         self._bypass_capable = True
@@ -225,15 +227,24 @@ class TimeMLP(torch.nn.Module):
                 if c_components is not None:
                     c_emb = torch.cat(
                         tuple(c_components.values())
-                        if isinstance(c_parts, dict)
-                        else tuple(c_parts),
+                        if isinstance(c_components, dict)
+                        else tuple(c_components),
                         dim=-1
                     )
             else:
-                if self._condition_projection:
+                if self._condition_projection and self._custom_condition_module:
                     if isinstance(c, dict): c_emb = self.condition_projection_block(c)
                     elif isinstance(c, (tuple, list)): c_emb = self.condition_projection_block(*c)
                     else: c_emb = self.condition_projection_block(c)
+                elif self._condition_projection and not self._custom_condition_module:
+                    c_components = apply_recursively(c, lambda x: x.flatten(1))
+                    c_emb = torch.cat(
+                        tuple(c_components.values())
+                        if isinstance(c_components, dict)
+                        else tuple(c_components),
+                        dim=-1
+                    )
+                    c_emb = self.condition_projection_block(c_emb)
                 elif self._condition_concat:
                     c_emb = c
 
