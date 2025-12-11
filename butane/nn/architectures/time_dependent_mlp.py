@@ -5,6 +5,7 @@ from ..modules.mlp_block import MLPBlock
 from ..modules.embeddings import SinusoidalEmbeddings
 from ..utils import utils
 from ..wrapper.x_dependent import XDependentSequential
+from ..._utils import apply_recursively
 
 class TimeMLP(torch.nn.Module):
 
