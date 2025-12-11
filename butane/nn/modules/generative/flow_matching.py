@@ -67,7 +67,7 @@ class FlowMatching(torch.nn.Module):
         spatial_dims = x0.shape[1:]
 
         if condition is not None:
-            condition = self._to_device_recursive(condition, _device)
+            condition = apply_recursively(condition, lambda x: x.to(_device))
 
         if edm_time_grid:
             timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=reverse).to(_device)
@@ -84,7 +84,7 @@ class FlowMatching(torch.nn.Module):
             spatial_dims = x0.shape[2:]
             x0 = x0.transpose(0, 1).flatten(0, 1)
             if condition is not None:
-                condition = self._repeat_recursive(condition, n_generations)
+                condition = apply_recursively(condition, lambda x: x.repeat_interleave(repeats=n_generations, dim=0))
 
         func = lambda t, x, c: model(x, t.expand(x.size(0), 1), c)
 
@@ -161,14 +161,14 @@ class FlowMatching(torch.nn.Module):
         spatial_dims = x1.shape[1:]
 
         if condition is not None:
-            condition = self._to_device_recursive(condition, _device)
+            condition = apply_recursively(condition, lambda x: x.to(_device))
 
         if multiple_gen_per_condition:
             n_generations, n_conditions = x1.size(0), x1.size(1)
             spatial_dims = x1.shape[2:]
             x1 = x1.transpose(0, 1).flatten(0, 1)
             if condition is not None:
-                condition = self._repeat_recursive(condition, n_generations)
+                condition = apply_recursively(condition, lambda x: x.repeat_interleave(repeats=n_generations, dim=0))
 
         z = (torch.randn_like(x1).to(_device) < 0) * 2.0 - 1.0
         if edm_time_grid:
@@ -317,33 +317,6 @@ class FlowMatching(torch.nn.Module):
         if not reverse:
             timesteps = 1 - timesteps.clamp(0., 1.)
         return timesteps.float()
-
-    @staticmethod
-    def _to_device_recursive(
-        x: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]],
-        device
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
-        if isinstance(x, (tuple, list)):
-            return type(x)(FlowMatching._to_device_recursive(i) for i in x)
-        if isinstance(x, dict):
-            return {k: FlowMatching._to_device_recursive(v, device) for k, v in x.items()}
-        if isinstance(x, torch.Tensor):
-            return x.to(device)
-        return x
-
-    @staticmethod
-    def _repeat_recursive(
-        x: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]],
-        n_repeats: int,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
-        if isinstance(x, (tuple, list)):
-            return type(x)(FlowMatching._repeat_recursive(i, n_repeats) for i in x)
-        if isinstance(x, dict):
-            return {k: FlowMatching._repeat_recursive(v, n_repeats) for k, v in x.items()}
-        if isinstance(x, torch.Tensor):
-            return x.repeat_interleave(n_repeats, dim=0)
-        return x
-
 
 class ConditionalFlowMatching(FlowMatching):
 
