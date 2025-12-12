@@ -1,4 +1,5 @@
 from typing import Optional, Union, Tuple, Dict, List, Any
+from functools import reduce
 import torch
 from ..._typedefs import *
 from ..modules.mlp_block import MLPBlock
