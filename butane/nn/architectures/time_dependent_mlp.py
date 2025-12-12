@@ -18,20 +18,14 @@ class TimeMLP(torch.nn.Module):
         activation_function: torch.nn.Module = torch.nn.SiLU(),
         time_embedding_size: Optional[int] = None,
         zero_out: bool = False,
-
-        # Architecture Mode
-        simplified: bool = True, # True = Raw Concat, False = Up-Project + Add
-        project_input: bool = False, # If True in advanced mode, projects input to match time dim
-
-        # Conditioning Args
+        simplified: bool = True,
+        project_input: bool = False,
         condition_input_dims: Optional[Union[int, Dict[str, Any], List[int]]] = None,
         condition_hidden_dims: Optional[int] = None,
         condition_concat: bool = False,
         condition_projection: bool = False,
         condition_projection_module: Optional[torch.nn.Module] = None,
         pretrained_condition_module: bool = False,
-
-        # Class Conditioning
         n_classes: Optional[int] = None,
         class_drop_prob: float = 0.,
     ):
@@ -85,7 +79,6 @@ class TimeMLP(torch.nn.Module):
         if self._n_classes is not None:
             self._null_class_idx = self._n_classes
             if self._simplified:
-                # One-Hot encoding size
                 self._class_emb_dim = self._n_classes + 1 if self._class_drop_prob > 0 else self._n_classes
             else:
                 self.class_embedder = torch.nn.Embedding(
@@ -103,10 +96,10 @@ class TimeMLP(torch.nn.Module):
             if isinstance(self._condition_input_dims, int):
                 raw_cond_size = self._condition_input_dims
             elif isinstance(self._condition_input_dims, (dict, list, tuple)):
-                # Sum of product of all shapes
                 def get_size(obj):
                     if isinstance(obj, int): return obj
-                    if isinstance(obj, (list, tuple)): return torch.tensor(obj).prod().item()
+                    if isinstance(obj, (list, tuple)): return reduce(lambda a, b: a * b, obj)
+                    if isinstance(obj, torch.Tensor): return obj.prod().int().item()
                     return 0
 
                 if isinstance(self._condition_input_dims, dict):
@@ -118,7 +111,6 @@ class TimeMLP(torch.nn.Module):
             self._condition_output_dim = raw_cond_size
             self._bypass_capable = True
         else:
-            # Advanced Mode: Projection modules
             self._custom_condition_module = False
             if self._has_condition and self._condition_projection:
                 if condition_projection_module is not None:
@@ -127,23 +119,24 @@ class TimeMLP(torch.nn.Module):
                     out_shape = utils.calculate_output_size(self.condition_projection_block, input_dims=self._condition_input_dims)
                     self._condition_output_dim = torch.tensor(out_shape).prod().item()
                     self._custom_condition_module = True
-                    
+
                     if raw_cond_size == self._condition_output_dim:
                         self._bypass_capable = True
 
-                elif self._has_condition and isinstance(self._condition_input_dims, int):
+                elif self._has_condition:
                     self.condition_projection_block = MLPBlock(
-                        input_dims=self._condition_input_dims,
+                        input_dims=raw_cond_size,
                         output_dims=self._internal_dim,
                         hidden_dims=self._condition_hidden_dims,
                         activation_function=[activation_function],
+                        output_activation=False,
                         zero_out=zero_out,
                     )
                     self._condition_output_dim = self._internal_dim
                     self._bypass_capable = (self._condition_input_dims == self._internal_dim)
                 else:
                     raise ValueError("Advanced mode requires 'condition_projection_module' for Dict/List inputs.")
-                
+
             elif self._condition_concat:
                 self._condition_output_dim = raw_cond_size
 
@@ -243,7 +236,7 @@ class TimeMLP(torch.nn.Module):
                         if isinstance(c_components, dict)
                         else tuple(c_components),
                         dim=-1
-                    )
+                    ) if not isinstance(c_components, torch.Tensor) else c_components
                     c_emb = self.condition_projection_block(c_emb)
                 elif self._condition_concat:
                     c_emb = c
