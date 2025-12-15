@@ -19,8 +19,8 @@ class PairDataset(Dataset):
         return_tuple: bool = False,
         device: torch.device = 'cpu',
     ) -> None:
-        super().__init__()
 
+        super().__init__()
         self.data = torch.tensor([]) if data is None else data.detach().clone().float()
         self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
         self.data_pair = torch.tensor([]) if data is None else data_pair.detach().clone().float()
@@ -101,16 +101,12 @@ class PairDataset(Dataset):
         _transforms = self._transforms
         (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage, self.data, self.targets)
         (split_1_data_pair, split_1_targets_pair), (split_2_data_pair, split_2_targets_pair) = self._split(percentage, self.data_pair, self.targets_pair)
-        self.__init__(
-            data=split_1_data,
-            targets=split_1_targets,
-            data_pair=split_1_data_pair,
-            targets_pair=split_1_targets_pair,
-            on_demand_device_load=self._on_demand_device_load,
-            device=self._device,
-            return_tuple=self._return_tuple
-        )
-        self.set_transforms(_transforms)
+
+        self.data = split_1_data
+        self.targets = split_1_targets
+        self.data_pair = split_1_data_pair
+        self.targets_pair = split_1_targets_pair
+
         splitted_ds = PairDataset(
             data=split_2_data,
             targets=split_2_targets,
@@ -142,8 +138,14 @@ class PairDataset(Dataset):
         self._device = device
         return self
 
-    # TODO: Impl saving functionality
-    def save(self, filepath: str) -> None:...
+    def save(self, filepath: str) -> None:
+        base_path = filepath.rsplit('.', 1)[0]
+        torch.save(self.data.cpu().detach(), f"{base_path}_data.pt")
+        torch.save(self.data_pair.cpu().detach(), f"{base_path}_data_pair.pt")
+        if self._has_targets():
+            torch.save(self.targets.cpu().detach(), f"{base_path}_targets.pt")
+        if self._has_targets_pair():
+            torch.save(self.targets_pair.cpu().detach(), f"{base_path}_targets_pair.pt")
 
     def set(
         self,
@@ -169,25 +171,6 @@ class PairDataset(Dataset):
         self.data = self.data[mask]
         if self._has_targets():
             self.targets = self.targets[mask]
-
-    def set_transforms(self, transforms: Transforms):
-        self._transforms = transforms
-        self._vectorized_transforms = torch.vmap(transforms)
-
-    def transforms(self) -> Transforms:
-        return self._transforms
-
-    def sizes(self) -> List[int]:
-        return list(self.data.size())
-
-    def __len__(self) -> int:
-        return self.data.size(0)
-
-    def numel(self) -> int:
-        return self.data.numel()
-
-    def return_tuple(self) -> None:
-        self._return_tuple = True
 
     def _split(
         self,

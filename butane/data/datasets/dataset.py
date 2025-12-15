@@ -14,6 +14,7 @@ class Dataset(torch.utils.data.Dataset):
         return_tuple: bool = False,
         device: torch.device = 'cpu',
     ) -> None:
+
         super().__init__()
         self.data = torch.tensor([]) if data is None else data.detach().clone().float()
         self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
@@ -28,7 +29,7 @@ class Dataset(torch.utils.data.Dataset):
     def _has_targets(self):
         return self.targets is not None and self.targets.numel() > 0
 
-    def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, idx: Union[int, List[int]]) -> Union[Tuple[torch.Tensor], Dict[str, torch.Tensor]]:
         _data = self.data[idx]
         if self._on_demand_device_load:
             _data = _data.to(self._device)
@@ -50,14 +51,10 @@ class Dataset(torch.utils.data.Dataset):
             return None
         _transforms = self._transforms
         (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage)
-        self.__init__(
-            data=split_1_data,
-            targets=split_1_targets,
-            on_demand_device_load=self._on_demand_device_load,
-            device=self._device,
-            return_tuple=self._return_tuple
-        )
-        self.set_transforms(_transforms)
+
+        self.data = split_1_data
+        self.targets = split_1_targets
+
         splitted_ds = Dataset(
             data=split_2_data,
             targets=split_2_targets,
@@ -120,20 +117,14 @@ class Dataset(torch.utils.data.Dataset):
     def transforms(self) -> Transforms:
         return self._transforms
 
-    def sizes(self) -> List[int]:
-        return list(self.data.size())
+    def size(self, dim: Optional[int] = None) -> Union[List[int], int]:
+        return list(self.data.size(dim)) if dim is None else self.data.size(dim)
 
     def __len__(self) -> int:
         return self.data.size(0)
 
     def numel(self) -> int:
         return self.data.numel()
-
-    def data_ref(self) -> torch.Tensor:
-        return self.data
-
-    def targets_ref(self) -> torch.Tensor:
-        return self.targets
 
     def return_tuple(self) -> None:
         self._return_tuple = True

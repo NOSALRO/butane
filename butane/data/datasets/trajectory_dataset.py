@@ -107,6 +107,9 @@ class TrajectoryDataset(Dataset):
         # dataset.set_transforms(transforms)
         return dataset
 
+    def size(self, dim: Optional[int] = None) -> Union[List[int], int]:
+        return list(self[:]["data"].size(dim)) if dim is None else self[:]["data"].size(dim)
+
     def __prepare_data(self):
         if not (self._loop or self._drop_last):
             self.data = torch.cat([self.data, self.data[:, [-1], :].repeat(1, (self.context + self.horizon), 1)], dim=1)
