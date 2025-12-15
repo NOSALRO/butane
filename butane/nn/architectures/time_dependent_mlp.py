@@ -230,7 +230,7 @@ class TimeMLP(torch.nn.Module):
                     if isinstance(c, dict): c_emb = self.condition_projection_block(c)
                     elif isinstance(c, (tuple, list)): c_emb = self.condition_projection_block(*c)
                     else: c_emb = self.condition_projection_block(c)
-                elif self._condition_projection and not self._custom_condition_module:
+                else:
                     c_components = apply_recursively(c, lambda x: x.flatten(1))
                     c_emb = torch.cat(
                         tuple(c_components.values())
@@ -238,9 +238,8 @@ class TimeMLP(torch.nn.Module):
                         else tuple(c_components),
                         dim=-1
                     ) if not isinstance(c_components, torch.Tensor) else c_components
-                    c_emb = self.condition_projection_block(c_emb)
-                elif self._condition_concat:
-                    c_emb = c
+                    if self._condition_projection:
+                        c_emb = self.condition_projection_block(c_emb)
 
             if c_emb is not None and c_emb.ndim > 2:
                 c_emb = c_emb.flatten(1)
