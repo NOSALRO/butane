@@ -166,7 +166,7 @@ class ResBlockNd(XDependent):
         self,
         x: torch.Tensor,
         e: Optional[torch.Tensor] = None,
-        c: Optional[torch.Tensor] = None
+        c: Optional[torch.Tensor] = None # Unused
     ) -> torch.Tensor:
         h_x = self.input_layer(x)
         h_x = self.up_down_h(h_x)
@@ -477,7 +477,7 @@ class UNetNd(torch.nn.Module):
                     output_dims=self._embedding_size,
                     hidden_dims=[self._embedding_size],
                     activation_function=[torch.nn.SiLU()],
-                    output_activation=False,
+                    output_activation=True,
             )
         else:
             self._time_embedding_size = None
@@ -540,7 +540,7 @@ class UNetNd(torch.nn.Module):
             self._null_class_idx = self._n_classes
 
         self.input_layer = self.conv(self._input_dims[0], self._channels[0], 3, padding=1)
-        _updated_input_dims = utils.calculate_output_size(self.input_layer, input_dims=self._input_dims)
+        _downsample_input_dims = utils.calculate_output_size(self.input_layer, input_dims=self._input_dims)
         _downsampling_channels = [self._channels[0]]
         self._resampled = []
 
@@ -553,28 +553,28 @@ class UNetNd(torch.nn.Module):
                 _subblock = XDependentSequential()
                 _subblock.append(
                     self.residual_block_creator(
-                        input_dims=_updated_input_dims,
+                        input_dims=_downsample_input_dims,
                         embedding_size=self._embedding_size,
                         dropout=self._dropout,
                         output_channels=ch,
                         zero_out=zero_conv,
                         use_film=self._use_film
                 ))
-                _updated_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_updated_input_dims)
+                _downsample_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_downsample_input_dims)
 
                 if i in self._attention_channel_idx:
-                    _subblock.append(_attention_module(_updated_input_dims[0]))
+                    _subblock.append(_attention_module(_downsample_input_dims[0]))
 
                 if self._condition_cross_attention:
-                    _subblock.append(CrossAttentionCondition(_updated_input_dims[0], _cross_attention_module))
+                    _subblock.append(CrossAttentionCondition(_downsample_input_dims[0], _cross_attention_module))
 
                 self.downsample_blocks.append(_subblock)
-                _downsampling_channels.append(int(_updated_input_dims[0]))
+                _downsampling_channels.append(int(_downsample_input_dims[0]))
                 self._resampled.append(False)
             if (i + 1) != len(self._channels):
                 self.downsample_blocks.append(
                     XDependentSequential(self.residual_block_creator(
-                        input_dims=_updated_input_dims,
+                        input_dims=_downsample_input_dims,
                         embedding_size=self._embedding_size,
                         dropout=self._dropout,
                         output_channels=ch,
@@ -582,54 +582,57 @@ class UNetNd(torch.nn.Module):
                         zero_out=zero_conv,
                         downsample=True,
                     ) if self._resample_with_resblock
-                    else self.downsample(_updated_input_dims, use_conv=conv_resample, output_channels=ch)
+                    else self.downsample(_downsample_input_dims, use_conv=conv_resample, output_channels=ch)
                 ))
                 self._resampled.append(True)
-                _updated_input_dims = utils.calculate_output_size(self.downsample_blocks[-1][-1], input_dims=_updated_input_dims)
-                _downsampling_channels.append(int(_updated_input_dims[0]))
+                _downsample_input_dims = utils.calculate_output_size(self.downsample_blocks[-1][-1], input_dims=_downsample_input_dims)
+                _downsampling_channels.append(int(_downsample_input_dims[0]))
 
         self.middle_blocks = torch.nn.ModuleList()
+        _middle_block_input_dims = copy.deepcopy(_downsample_input_dims)
         for i in range(self._n_middle_blocks):
             _subblock = XDependentSequential()
             _subblock.append(
                 self.residual_block_creator(
-                    input_dims=_updated_input_dims,
+                    input_dims=_middle_block_input_dims,
                     embedding_size=self._embedding_size,
                     dropout=self._dropout,
-                    output_channels=_updated_input_dims[0],
+                    output_channels=_middle_block_input_dims[0],
                     zero_out=zero_conv,
                     use_film=self._use_film))
             if (i + 1) != self._n_middle_blocks:
-                _subblock.append(_attention_module(_updated_input_dims[0]))
+                _subblock.append(_attention_module(_middle_block_input_dims[0]))
             if self._condition_cross_attention:
-                _subblock.append(CrossAttentionCondition(_updated_input_dims[0], _cross_attention_module))
+                _subblock.append(CrossAttentionCondition(_middle_block_input_dims[0], _cross_attention_module))
             self.middle_blocks.append(_subblock)
 
-        self._bottleneck_res = copy.deepcopy(_updated_input_dims).numpy().tolist()
+        self._bottleneck_res = copy.deepcopy(_middle_block_input_dims).numpy().tolist()
         self.upsample_blocks = torch.nn.ModuleList([])
+        _upsample_input_dims = copy.deepcopy(_middle_block_input_dims)
         for i, ch in reversed(list(enumerate(self._channels))):
             for j in range(self._n_residual_blocks + 1):
                 _subblock = []
-                _updated_input_dims[0] = _updated_input_dims[0] + _downsampling_channels.pop()
+                _skip_connection_input_dims = copy.deepcopy(_upsample_input_dims)
+                _skip_connection_input_dims[0] = _skip_connection_input_dims[0] + _downsampling_channels.pop()
                 _subblock.append(
                     self.residual_block_creator(
-                        input_dims=_updated_input_dims,
+                        input_dims=_skip_connection_input_dims,
                         embedding_size=self._embedding_size,
                         dropout=self._dropout,
                         output_channels=ch,
                         zero_out=zero_conv,
                         use_film=self._use_film))
-                _updated_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_updated_input_dims)
+                _upsample_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_skip_connection_input_dims)
 
                 if i in self._attention_channel_idx:
-                    _subblock.append(_attention_module(_updated_input_dims[0]))
+                    _subblock.append(_attention_module(_upsample_input_dims[0]))
 
                 if self._condition_cross_attention:
-                    _subblock.append(CrossAttentionCondition(_updated_input_dims[0], _cross_attention_module))
+                    _subblock.append(CrossAttentionCondition(_upsample_input_dims[0], _cross_attention_module))
 
                 if i and j == self._n_residual_blocks:
                     _subblock.append(self.residual_block_creator(
-                            input_dims=_updated_input_dims,
+                            input_dims=_upsample_input_dims,
                             embedding_size=self._embedding_size,
                             dropout=self._dropout,
                             output_channels=ch,
@@ -637,25 +640,25 @@ class UNetNd(torch.nn.Module):
                             upsample=True,
                             zero_out=zero_conv,
                         ) if self._resample_with_resblock
-                        else self.upsample(_updated_input_dims, refine=conv_resample, output_channels=ch)
+                        else self.upsample(_upsample_input_dims, refine=conv_resample, output_channels=ch)
                     )
-                    _updated_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_updated_input_dims)
+                    _upsample_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_upsample_input_dims)
                 self.upsample_blocks.append(XDependentSequential(*_subblock))
 
         if self._condition_concat:
             self.condition_residual_block = self.residual_block_creator(
-                input_dims=[_updated_input_dims[0] * 2, *_updated_input_dims[1:]],
+                input_dims=[_upsample_input_dims[0] * 2, *_upsample_input_dims[1:]],
                 embedding_size=self._embedding_size,
                 dropout=self._dropout,
-                output_channels=_updated_input_dims[0],
+                output_channels=_upsample_input_dims[0],
                 use_film=self._use_film,
                 zero_out=zero_conv,
             )
 
         self.output_block = torch.nn.Sequential(
-            torch.nn.GroupNorm(32, _updated_input_dims[0]),
+            torch.nn.GroupNorm(32, _upsample_input_dims[0]),
             torch.nn.SiLU(),
-            utils.zero_module(self.conv(_updated_input_dims[0], self._output_channels, 3, padding=1))
+            utils.zero_module(self.conv(_upsample_input_dims[0], self._output_channels, 3, padding=1))
         )
 
         self.summary()
@@ -863,7 +866,7 @@ class UNetNd(torch.nn.Module):
             print("-" * 75)
             print(f"🧠  Attention Mechanism")
             print(f"  • Heads:                {self._attention_heads}")
-            print(f"  • Self-Attention:       Applied at channels {[self._channels[i] for i in self._attention_channel_idx]}")
+            print(f"  • Self-Attention:       Applied at channels {[(i, self._channels[i]) for i in self._attention_channel_idx]}")
             if self._condition_cross_attention:
                 print(f"  • Cross-Attention:      Applied at EVERY level (Down/Mid/Up)")
 

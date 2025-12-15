@@ -3,6 +3,7 @@ import os
 import torch
 from ..._typedefs import *
 from ..._helpers import module_name
+from ..._utils import apply_recursively
 
 
 def zero_module(module) -> torch.nn.Module:
@@ -62,13 +63,7 @@ def calculate_output_size(
             param = next(module.parameters())
             device = param.device
             dtype = param.dtype
-
-            def move(x):
-                if isinstance(x, torch.Tensor): return x.to(device, dtype=dtype)
-                if isinstance(x, dict): return {k: move(v) for k, v in x.items()}
-                if isinstance(x, (list, tuple)): return type(x)(move(i) for i in x)
-                return x
-            _input = move(_input)
+            _input = apply_recursively(_input, lambda x: x.to(device, dtype=dtype))
         except StopIteration:
             pass
 
