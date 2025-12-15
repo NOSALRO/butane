@@ -32,7 +32,9 @@ class PairDataset(Dataset):
         if not self._on_demand_device_load:
             self.data, self.data_pair = self.data.to(self._device), self.data_pair.to(self._device)
             self.targets, self.targets_pair = self.targets.to(self._device), self.targets_pair.to(self._device)
+        self._set_up_pairing()
 
+    def _set_up_pairing(self):
         if self._has_targets() and self._has_targets_pair():
             unique_targets_pair = torch.unique(self.targets_pair)
             mask = torch.isin(self.targets.view(-1), unique_targets_pair)
@@ -56,9 +58,9 @@ class PairDataset(Dataset):
             self._col_idx = (self._target_map != -1).sum(dim=1)
             self._anchor_row_idx = torch.searchsorted(unique_targets_pair, self.targets.view(-1))
             if not self._on_demand_device_load:
-                self._target_loc = self._target_loc.to(device)
-                self._target_map = self._target_map.to(device)
-                self._col_idx = self._col_idx.to(device)
+                self._target_loc = self._target_loc.to(self._device)
+                self._target_map = self._target_map.to(self._device)
+                self._col_idx = self._col_idx.to(self._device)
             # TODO: Clean data from the pair dataset side
 
     def _has_targets(self):
@@ -106,6 +108,7 @@ class PairDataset(Dataset):
         self.targets = split_1_targets
         self.data_pair = split_1_data_pair
         self.targets_pair = split_1_targets_pair
+        self._set_up_pairing()
 
         splitted_ds = PairDataset(
             data=split_2_data,
