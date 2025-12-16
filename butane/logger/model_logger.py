@@ -276,10 +276,8 @@ class ModelLogger:
             wandb.log(_key_accurate_stats, step=self._step)
 
     def add_config(self, **config):
-        for k, v in config.items():
-            if not isinstance(v, (list, tuple, dict, numbers.Number, np.ndarray, bool, type(None))):
-                config[k] = str(v)
-        self._config.update(config)
+        clean_config = self._sanitize_config(config)
+        self._config.update(clean_config)
         self.save_config(self.fpath)
 
     def add_analysis(self, name: str, data: Dict[str, List], step: Optional[int] = None):
@@ -422,3 +420,13 @@ class ModelLogger:
                 else:
                     items.append((new_key, v))
             return dict(items)
+
+    @staticmethod
+    def _sanitize_config(data: Any) -> Any:
+            if isinstance(data, dict):
+                return {k: ModelLogger._sanitize_config(v) for k, v in data.items()}
+            if isinstance(data, (list, tuple)):
+                return [ModelLogger._sanitize_config(v) for v in data]
+            if isinstance(data, (numbers.Number, np.ndarray, bool, type(None))):
+                return data
+            return str(data)
