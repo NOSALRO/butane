@@ -130,9 +130,9 @@ def load_state(
     if isinstance(model, torch.nn.Module):
         _device = next(model.parameters()).device
     elif isinstance(model, (list, tuple)):
-        _device = []
         for i, m in enumerate(model):
-            _device.append(next(m.parameters()).device)
+            _device = next(m.parameters()).device
+            break
     else:
         raise ("Model should be either torch.nn.Module or list of torch.nn.Modules")
 
@@ -141,6 +141,7 @@ def load_state(
         if os.path.exists(fpath + "/checkpoint." + suffix):
             cp = torch.load(fpath + "/checkpoint." + suffix, map_location=_device, weights_only=suffix == ".pt")
 
+    returns["step"] = cp.get("step")
     returns["model"] = __load(model, "model")
     returns["optimizer"] = __load(optimizer, "optimizer")
     returns["ema"] = __load(ema, "ema")
