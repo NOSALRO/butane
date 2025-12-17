@@ -4,7 +4,7 @@ import copy
 import torch
 
 from ..._typedefs import *
-from ..._helpers import _fill_defaults
+from ..._helpers import _fill_defaults, module_name
 from ..utils.utils import zero_module
 
 
@@ -20,6 +20,8 @@ class MLPBlock(torch.nn.Module):
         bias: BoolParams = [True],
         dropout: Optional[float] = [0.0],
         zero_out: bool = False,
+        normalization: BoolParams = None,
+        normalization_type: Optional[ModuleParams] = None,
         *,
         architecture: Optional[Architecture] = None,
     ) -> None:
@@ -40,6 +42,7 @@ class MLPBlock(torch.nn.Module):
         activation_function = _fill_defaults(activation_function, n_layers)
         bias = _fill_defaults(bias, n_layers)
         dropout = _fill_defaults(dropout, n_layers)
+        normalization = _fill_defaults(normalization, n_layers)
 
         if not output_activation:
             activation_function[-1] = torch.nn.Identity()
@@ -56,6 +59,11 @@ class MLPBlock(torch.nn.Module):
                     _linear = zero_module(_linear)
                 _architecture.append(_linear)
                 _architecture.append(activation_function[i])
+                if normalization[i] and normalization_type is not None:
+                    if module_name(normalization_type) == "GroupNorm":
+                        _architecture.append(normalization_type(num_channels=_hidden_dims[i+1]))
+                    else:
+                        _architecture.append(normalization_type(_hidden_dims[i+1]))
                 if dropout[i] != 0.:
                     _architecture.append(torch.nn.Dropout(dropout[i]))
 
