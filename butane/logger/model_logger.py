@@ -356,10 +356,9 @@ class ModelLogger:
         filename = f"{name}_{current_step}{extension}"
         dst = save_dir / filename
 
-        shutil.copy2(src, dst)
         if self._use_wandb:
             fmt = extension.lstrip(".")
-            w_vid = wandb.Video(str(dst), caption=f"{name} (Step {current_step})", format=fmt)
+            w_vid = wandb.Video(str(src), caption=f"{name} (Step {current_step})", format=fmt)
             wandb.log({f"videos/{name}": w_vid}, step=current_step)
 
     def save_config(self, fpath: str) -> None:
