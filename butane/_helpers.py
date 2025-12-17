@@ -19,6 +19,9 @@ def _fill_defaults(
 
     if not isinstance(vector, (tuple, list)):
         vector = [vector]
+    else:
+        if len(vector) != size and len(vector) > 1:
+            raise ValueError(f"Wrong argument size; Size should be either {size} or 1.")
 
     filled_vector = []
     if len(vector) == 1:
