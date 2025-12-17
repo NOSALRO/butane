@@ -14,7 +14,7 @@ def module_name(module: Union[torch.nn.Module, functools.partial]) -> str:
 def _fill_defaults(
     vector: Union[List[Any], Tuple[Any,...]],
     size: int,
-    size_of_item: Optional[int] = 0
+    size_of_item: int = 0
 ) -> List[Union[int, Tuple[Any,...]]]:
 
     if not isinstance(vector, (tuple, list)):
@@ -42,8 +42,6 @@ def _fill_defaults(
 
     elif len(vector) == size and size_of_item == 0:
         return vector
-    # else:
-    #     raise TypeError("Model configure num params error")
 
 def _prod(l: Union[List[Union[int, float]], Tuple[Union[int, float], ...]]) -> Union[float, int]:
     out = 1.
