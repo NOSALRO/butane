@@ -125,6 +125,7 @@ class ModelLogger:
             assert project is not None, "Set the WANDB_PROJECT env variable"
 
             id_file = self.fpath / "wandb_id.txt"
+            self._wandb_defined_metrics = set()
             if id_file.exists() and resume:
                 run_id = id_file.read_text().strip()
                 run_name = self.fpath.name
@@ -260,17 +261,24 @@ class ModelLogger:
         _best_cp_path = self.fpath / f"checkpoint_{self._rollback_monitor.best_step}"
         return degraded, _best_cp_path, self._rollback_monitor.best_step
 
-    def add_stats(self, **stats):
+    def add_stats(self, commit: bool = True, **stats):
         _key_accurate_stats = self._flatten_dict(stats)
 
+        if commit:
+            if 'step' in _key_accurate_stats:
+                self._step = _key_accurate_stats['step']
+            else:
+                # Auto-tick the clock
+                self._step += 1
+
         for k, v in _key_accurate_stats.items():
+            if self._use_wandb and k not in self._wandb_defined_metrics:
+                wandb.define_metric(name=k, step_metric="step")
+                self._wandb_defined_metrics.add(k)
             self._stats.setdefault(k, []).append(v)
 
-        if 'step' in _key_accurate_stats:
-            self._step = _key_accurate_stats['step']
-        else:
-            # Auto-tick the clock
-            self._step += 1
+        if "step" not in _key_accurate_stats:
+            _key_accurate_stats["step"] = self._step
 
         if self._use_wandb:
             wandb.log(_key_accurate_stats, step=self._step)
@@ -288,12 +296,11 @@ class ModelLogger:
             analysis_dir = self.fpath / "analysis"
             analysis_dir.mkdir(parents=True, exist_ok=True)
 
-        csv_path = analysis_dir / f"{name}_analysis_{current_step}.csv"
+        csv_path = analysis_dir / f"{name}_analysis.csv"
         keys = list(data.keys())
         values = list(data.values())
 
         if not values: return
-        # Add some handling for not same size columns
         rows = list(zip(*values))
 
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
@@ -303,7 +310,7 @@ class ModelLogger:
 
         if self._use_wandb:
             table = wandb.Table(columns=keys, data=rows)
-            wandb.log({f"analysis/{name}_{current_step}": table})
+            wandb.log({f"analysis/{name}_{current_step}": table}, step=current_step)
 
     def add_image(self, name: str, image: Any, step: Optional[int] = None, **kwargs):
 
@@ -315,8 +322,7 @@ class ModelLogger:
             save_dir = self.fpath / "outputs"
             save_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = f"{name}_{current_step}.png"
-        file_path = save_dir / filename
+        file_path = save_dir / name
 
         if hasattr(image, 'savefig'):
             image.savefig(file_path, **kwargs)
@@ -329,7 +335,7 @@ class ModelLogger:
 
         if self._use_wandb:
             w_img = wandb.Image(str(file_path), caption=f"{name} (Step {current_step})")
-            wandb.log({f"images/{name}_{current_step}": w_img})
+            wandb.log({f"images/{name}": w_img}, step=current_step)
 
     def add_video(self, name: str, video_path: str, step: Optional[int] = None):
 
@@ -352,11 +358,12 @@ class ModelLogger:
 
         shutil.copy2(src, dst)
         if self._use_wandb:
-            w_vid = wandb.Video(str(dst), caption=f"{name} (Step {current_step})", format=extension.replace(".", ""))
-            wandb.log({f"videos/{name}_{current_step}": w_vid})
+            fmt = extension.lstrip(".")
+            w_vid = wandb.Video(str(dst), caption=f"{name} (Step {current_step})", format=fmt)
+            wandb.log({f"videos/{name}": w_vid}, step=current_step)
 
-    def save_config(self, fpath: Optional[str] = None) -> None:
-        with open(f'{fpath if fpath else self._last_path}/config.yaml', 'w', encoding='utf-8') as f:
+    def save_config(self, fpath: str) -> None:
+        with open(f'{fpath}/config.yaml', 'w', encoding='utf-8') as f:
             yaml.dump(self._config, f, sort_keys=False, allow_unicode=True, Dumper=_LiteralDumper)
         if self._use_wandb:
             wandb.config.update(self._config, allow_val_change=True)
