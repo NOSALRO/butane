@@ -72,16 +72,17 @@ class UpsampleNd(torch.nn.Module):
         if output_channels is None:
             output_channels = input_dims[0]
 
-        if self.dims == 3:
-            self.upsample_layer = torch.nn.Upsample(size=(input_dims[1], input_dims[2] * 2, input_dims[3] * 2), mode='nearest')
-        else:
+        if self.dims < 3:
             self.upsample_layer = torch.nn.Upsample(scale_factor=2, mode='nearest')
 
         if refine:
             self.refinement_layer = self.conv(input_dims[0], output_channels, 3, padding=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.upsample_layer(x)
+        if self.dims == 3:
+            h = torch.nn.functional.interpolate(x, (x.shape[2], x.shape[3] * 2, x.shape[4] * 2), mode="nearest")
+        else:
+            h = self.upsample_layer(x)
         if hasattr(self, 'refinement_layer'):
             h = self.refinement_layer(h)
         return h
@@ -128,9 +129,12 @@ class ResBlockNd(XDependent):
         )
 
         if embedding_size is not None:
-            self.embedding_layers = torch.nn.Linear(
+            self.embedding_layers = torch.nn.Sequential(
+                torch.nn.SiLU(),
+                torch.nn.Linear(
                     embedding_size,
-                    (output_channels * 2) if use_film else output_channels,
+                    (output_channels * 2) if use_film else output_channels
+                )
             )
 
         if upsample:
@@ -143,8 +147,8 @@ class ResBlockNd(XDependent):
             self.up_down_x = torch.nn.Identity()
             self.up_down_h = torch.nn.Identity()
 
+        self.pre_block_2_norm = torch.nn.GroupNorm(32, output_channels)
         self.block_2 = torch.nn.Sequential(
-            torch.nn.GroupNorm(32, output_channels),
             torch.nn.SiLU(),
             torch.nn.Dropout(p=dropout)
         )
@@ -172,21 +176,19 @@ class ResBlockNd(XDependent):
         h_x = self.up_down_h(h_x)
         x = self.up_down_x(x)
         h_x = self.block_1(h_x)
+        h_x = self.pre_block_2_norm(h_x)
 
         if e is not None:
             h_e = self.embedding_layers(e).type(h_x.dtype)
             while h_x.dim() != h_e.dim():
                 h_e = h_e[..., None]
-
             if self._use_film:
                 scale, shift = torch.chunk(h_e, chunks=2, dim=1)
-                h_x = self.block_2(h_x) * (1 + scale) + shift
-                h_x = self.output_layer(h_x)
+                h_x = h_x * (1 + scale) + shift
             elif h_x.size(1) == h_e.size(1):
                 h_x = h_x + h_e
-                h_x = self.output_layer(self.block_2(h_x))
-        else:
-            h_x = self.output_layer(self.block_2(h_x))
+
+        h_x = self.output_layer(self.block_2(h_x))
         return self.shortcut(x) + h_x
 
 class ResBlock1d(ResBlockNd):
@@ -462,6 +464,7 @@ class UNetNd(torch.nn.Module):
             dropout_p=attention_dropout,
             prenorm=partial(torch.nn.GroupNorm, num_groups=32),
             bias=True,
+            apply_residual=True,
             zero_out=zero_conv,
         )
 
@@ -477,7 +480,7 @@ class UNetNd(torch.nn.Module):
                     output_dims=self._embedding_size,
                     hidden_dims=[self._embedding_size],
                     activation_function=[torch.nn.SiLU()],
-                    output_activation=True,
+                    output_activation=False,
             )
         else:
             self._time_embedding_size = None
@@ -524,6 +527,7 @@ class UNetNd(torch.nn.Module):
                 kv_n_dims=1 if len(self._condition_output_dims) <= 2 else 2,
                 kernel_size=1,
                 n_heads=self._attention_heads,
+                apply_residual=True,
                 dropout_p=attention_dropout,
                 prenorm=partial(torch.nn.GroupNorm, num_groups=min(32, 2 ** math.floor(math.log2(self._condition_output_dims[0])))),
                 bias=True,
@@ -791,6 +795,7 @@ class UNetNd(torch.nn.Module):
             else:
                 condition = c
 
+        # TODO: Check timestep scaling * 1000
         x, emb, c_emb = self.prepare_conditioning(x, t, c=condition, y=labels, z=projection)
         return self._forward(x, emb, c_emb)
 
@@ -863,10 +868,11 @@ class UNetNd(torch.nn.Module):
                 print(f"  • Encoded Cond Shape:   {self._condition_output_dims.numpy().tolist()} (Features for Attn/Proj)")
 
         if self._attention or self._condition_cross_attention:
-            print("-" * 75)
-            print(f"🧠  Attention Mechanism")
-            print(f"  • Heads:                {self._attention_heads}")
-            print(f"  • Self-Attention:       Applied at channels {[(i, self._channels[i]) for i in self._attention_channel_idx]}")
+            if len(self._attention_channel_idx) > 0:
+                print("-" * 75)
+                print(f"🧠  Attention Mechanism")
+                print(f"  • Heads:                {self._attention_heads}")
+                print(f"  • Self-Attention:       Applied at channels {[(i, self._channels[i]) for i in self._attention_channel_idx]}")
             if self._condition_cross_attention:
                 print(f"  • Cross-Attention:      Applied at EVERY level (Down/Mid/Up)")
 

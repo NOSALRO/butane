@@ -7,7 +7,7 @@ from ..._typedefs import *
 
 class LearnableEmbeddings(torch.nn.Module):
 
-    def __init__(self, d_model: int, max_seq_len: Optional[int] = 1000):
+    def __init__(self, d_model: int, max_seq_len: Optional[int] = 10_000):
         super().__init__()
         self._embeddings = torch.nn.Embedding(max_seq_len, d_model)
 
@@ -25,7 +25,7 @@ class FourierEmbeddings(torch.nn.Module):
     def __init__(
         self,
         d_model: int,
-        max_seq_len: Optional[int] = 1000,
+        max_seq_len: Optional[int] = 10_000,
         learnable: bool = False
     ) -> None:
         super().__init__()
@@ -44,7 +44,7 @@ class FourierEmbeddings(torch.nn.Module):
         return embeddings
 
     @staticmethod
-    def get_embeddings(x: torch.Tensor, d_model: int, max_seq_len: Optional[int] = 1000) -> torch.Tensor:
+    def get_embeddings(x: torch.Tensor, d_model: int, max_seq_len: Optional[int] = 10_000) -> torch.Tensor:
         return FourierEmbeddings(d_model, max_seq_len=max_seq_len)(x)
 
 class SinusoidalEmbeddings(torch.nn.Module):
@@ -52,13 +52,13 @@ class SinusoidalEmbeddings(torch.nn.Module):
     def __init__(
         self,
         d_model: int,
-        max_seq_len: Optional[int] = 1000,
+        max_seq_len: Optional[int] = 10_000,
         learnable: bool = False
     ) -> None :
         super().__init__()
         _pe = torch.zeros((max_seq_len, d_model))
         pos = torch.arange(max_seq_len).unsqueeze(1)
-        div_term = torch.pow(10000, torch.arange(0, d_model, 2) / d_model)
+        div_term = torch.pow(10_000, torch.arange(0, d_model, 2) / d_model)
         _pe[:, 0::2] = torch.sin(pos/div_term)
         _pe[:, 1::2] = torch.cos(pos/div_term)
         self._PE = torch.nn.Parameter(_pe, requires_grad=learnable)
@@ -71,7 +71,7 @@ class SinusoidalEmbeddings(torch.nn.Module):
         return x
 
     @staticmethod
-    def get_embeddings(x: torch.Tensor, d_model: int, max_seq_len: Optional[int] = 1000) -> torch.Tensor:
+    def get_embeddings(x: torch.Tensor, d_model: int, max_seq_len: Optional[int] = 10_000) -> torch.Tensor:
         return SinusoidalEmbeddings(d_model, max_seq_len=max_seq_len)(x)
 
 class PatchEmbeddingsNd(torch.nn.Module):
@@ -124,7 +124,7 @@ class PatchEmbeddings3d(PatchEmbeddingsNd):
 
 class RelativePositionEmbeddings(torch.nn.Module):
 
-    def __init__(self, d_model: int, max_seq_len: Optional[int] = 1000):
+    def __init__(self, d_model: int, max_seq_len: Optional[int] = 10_000):
         super().__init__()
         self._k = torch.nn.Embedding(max_seq_len, d_model)
         self._v = torch.nn.Embedding(max_seq_len, d_model)
