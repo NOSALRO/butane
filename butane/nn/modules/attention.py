@@ -17,7 +17,9 @@ class _AttentionTemplate(torch.nn.Module):
         n_heads: int = 1,
         dropout_p: float = 0.0,
         causal: bool = False,
-        flash_attention: bool = False
+        flash_attention: bool = False,
+        prenorm: bool = True,
+        zero_out: bool = True,
     ):
         super().__init__()
         assert d_model % n_heads == 0, "Features cannot be devided equally to N heads"
@@ -27,6 +29,8 @@ class _AttentionTemplate(torch.nn.Module):
         self.d_k = self._d_model // self._n_heads
         self._causal = causal
         self._apply_residual = apply_residual
+        self._is_cross = kv_input_size is not None
+        self._prenorm_enabled = prenorm
         self._kv_input_size = kv_input_size if kv_input_size is not None else self._d_model
         self._flash_attention = flash_attention
 
@@ -36,10 +40,18 @@ class _AttentionTemplate(torch.nn.Module):
         self.query = torch.nn.Linear(self._d_model, self._d_model)
         self.key = torch.nn.Linear(self._kv_input_size, self._d_model)
         self.value = torch.nn.Linear(self._kv_input_size, self._d_model)
-        self.linear_projection = torch.nn.Linear(self._d_model, self._d_model)
         # fmt: on
 
+        self.norm_1 = torch.nn.LayerNorm(self._d_model) if self._prenorm_enabled else torch.nn.Identity()
+        self.norm_2 = torch.nn.LayerNorm(self._kv_input_size) if self._prenorm_enabled and self._is_cross else torch.nn.Identity()
+
         self.dropout = torch.nn.Dropout(dropout_p)
+
+        self.linear_projection = (
+            torch.nn.Linear(self._d_model, self._d_model)
+            if not zero_out
+            else utils.zero_module(torch.nn.Linear(self._d_model, self._d_model))
+        )
 
     def forward(self, x1: torch.Tensor, x2: Optional[torch.Tensor] = None, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
 
@@ -54,9 +66,16 @@ class _AttentionTemplate(torch.nn.Module):
         if x1.dim() > 3: x1 = x1.flatten(2)
         if x2.dim() > 3: x2 = x2.flatten(2)
 
-        _q = self.query(x1)
-        _k = self.key(x2)
-        _v = self.value(x2)
+        q_input = self.norm_1(x1) if self._prenorm_enabled else x1
+
+        if self._is_cross:
+            kv_input = self.norm_2(x2) if self._prenorm_enabled else x2
+        else:
+            kv_input = q_input
+
+        _q = self.query(q_input)
+        _k = self.key(kv_input)
+        _v = self.value(kv_input)
 
         if self._n_heads > 1:
             _q = _q.reshape(B, L_Q, self._n_heads, self.d_k).transpose(1, 2)
@@ -95,8 +114,12 @@ class _AttentionTemplate(torch.nn.Module):
         return out.reshape(*out.shape[:-1], *_spatial)
 
 class SelfAttention(_AttentionTemplate):
-    def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None):
-        return super().forward(x1, x2=None, mask=mask)
+    def __init__(self, d_model: int, **kwargs):
+        kwargs.pop('kv_input_size', None)
+        super().__init__(d_model, kv_input_size=None, **kwargs)
+
+    def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        return super().forward(x1=x1, x2=None, mask=mask)
 
 class CrossAttention(_AttentionTemplate): ...
 
@@ -110,14 +133,14 @@ class _SpatialAttentionTemplate(torch.nn.Module):
         d_model: int,
         *,
         kv_input_size: Optional[int] = None,
-        kv_n_dims: int = None,
-        kernel_size: Optional[int] = 1,
-        n_heads: Optional[int] = 1,
-        dropout_p: Optional[float] = 0.0,
-        bias: Optional[bool] = False,
-        prenorm: ModuleParams = None,
+        kv_n_dims: Optional[int] = None,
+        kernel_size: int = 1,
+        n_heads: int = 1,
+        dropout_p: float = 0.0,
+        bias: bool = False,
+        prenorm: Optional[ModuleParams] = None,
         zero_out: bool = False,
-        apply_residual: bool = False,
+        apply_residual: bool = True,
         flash_attention: bool = False,
     ):
         super().__init__()
@@ -126,6 +149,7 @@ class _SpatialAttentionTemplate(torch.nn.Module):
         self._d_model = d_model
         self._n_heads = n_heads
         self.d_k = int(self._d_model) // self._n_heads
+        self._is_cross = kv_input_size is not None
         self._kv_input_size = kv_input_size if kv_input_size is not None else self._d_model
         self._apply_residual = apply_residual
         self._dropout_p = dropout_p
@@ -157,12 +181,12 @@ class _SpatialAttentionTemplate(torch.nn.Module):
         if prenorm is not None:
             if module_name(prenorm) == "GroupNorm":
                 self.norm_1 = prenorm(num_channels=self._d_model)
-                self.norm_2 = prenorm(num_channels=self._kv_input_size)
+                self.norm_2 = prenorm(num_channels=self._kv_input_size) if self._is_cross else None
             elif module_name(prenorm) == "LayerNorm":
                 raise ValueError("Cannot use LayerNorm in self-attention")
             else:
                 self.norm_1 = prenorm(self._d_model)
-                self.norm_2 = prenorm(self._kv_input_size)
+                self.norm_2 = prenorm(self._kv_input_size) if self._is_cross else None
 
     def forward(
         self,
@@ -187,7 +211,10 @@ class _SpatialAttentionTemplate(torch.nn.Module):
         L2 = x2.shape[2:].numel()
 
         q_input = self.norm_1(x1) if self.norm_1 is not None else x1
-        kv_input = self.norm_2(x2) if self.norm_2 is not None else x2
+        if self._is_cross:
+            kv_input = self.norm_2(x2) if self.norm_2 is not None else x2
+        else:
+            kv_input = q_input
 
         # conv projections
         q = self.query(q_input)
@@ -235,6 +262,11 @@ class _SpatialAttentionTemplate(torch.nn.Module):
         return out
 
 class SpatialSelfAttention(_SpatialAttentionTemplate):
+    def __init__(self, d_model: int, **kwargs):
+        kwargs.pop('kv_input_size', None)
+        kwargs.pop('kv_n_dims', None)
+        super().__init__(d_model, kv_input_size=None, kv_n_dims=None, **kwargs)
+
     def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None):
         return super().forward(x1, x2=None, mask=mask)
 
