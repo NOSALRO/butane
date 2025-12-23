@@ -21,12 +21,13 @@ class PairDataset(Dataset):
     ) -> None:
 
         super().__init__()
-        self.data = torch.tensor([]) if data is None else data.detach().clone().float()
+        self.data = torch.tensor([]) if data is None else data.detach().clone()
         self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
-        self.data_pair = torch.tensor([]) if data is None else data_pair.detach().clone().float()
+        self.data_pair = torch.tensor([]) if data is None else data_pair.detach().clone()
         self.targets_pair = torch.tensor([]) if targets is None else targets_pair.detach().clone()
-        self._device = device
+        self._device = torch.device(device)
         self._transforms, self._vectorized_transforms = None, None
+        self._pair_transforms, self._vectorized_pair_transforms = None, None
         self._on_demand_device_load = on_demand_device_load
         self._return_tuple = return_tuple
         if not self._on_demand_device_load:
@@ -73,13 +74,16 @@ class PairDataset(Dataset):
     def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
 
         device = self._device if not self._on_demand_device_load else 'cpu'
+        use_vectorized_transforms = False
         if isinstance(idx, slice):
             start, stop, step = idx.indices(len(self))
             idx = torch.arange(start, stop, step, device=device)
+            use_vectorized_transforms = True
         elif isinstance(idx, int):
             idx = torch.tensor([idx], device=device)
         else: # List
             idx = torch.tensor(idx, device=device)
+            use_vectorized_transforms = True
 
         if self._has_targets() and self._has_targets_pair():
             row_indices = self._anchor_row_idx[idx]
@@ -94,6 +98,11 @@ class PairDataset(Dataset):
         if self._on_demand_device_load:
             _data = _data.to(self._device)
             _data_pair = _data_pair.to(self._device)
+
+        if self._transforms is not None:
+            _data = self._vectorized_transforms(_data) if use_vectorized_transforms else self._transforms(_data)
+        if self._pair_transforms is not None:
+            _data_pair = self._vectorized_pair_transforms(_data_pair) if use_vectorized_transforms else self._pair_transforms(_data_pair)
         return self._convert_to_tuple(dict(data=_data, targets=_data_pair))
 
 
@@ -101,6 +110,7 @@ class PairDataset(Dataset):
         if percentage == 0:
             return None
         _transforms = self._transforms
+        _pair_transforms = self._pair_transforms
         (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage, self.data, self.targets)
         (split_1_data_pair, split_1_targets_pair), (split_2_data_pair, split_2_targets_pair) = self._split(percentage, self.data_pair, self.targets_pair)
 
@@ -118,7 +128,7 @@ class PairDataset(Dataset):
             on_demand_device_load=self._on_demand_device_load,
             device=self._device,
             return_tuple=self._return_tuple)
-        splitted_ds.set_transforms(_transforms)
+        splitted_ds.set_transforms(_transforms, _pair_transforms)
         return splitted_ds
 
     def flatten(self, dim: int = 1) -> None:
@@ -140,6 +150,17 @@ class PairDataset(Dataset):
                 self._anchor_row_idx = self._anchor_row_idx.to(device)
         self._device = device
         return self
+
+    def set_transforms(self, transforms: Optional[Transforms] = None, pair_transforms: Optional[Transforms] = None):
+        if transforms is not None:
+            self._transforms = transforms
+            self._vectorized_transforms = torch.vmap(transforms)
+        if pair_transforms is not None:
+            self._pair_transforms = pair_transforms
+            self._vectorized_pair_transforms = torch.vmap(pair_transforms)
+
+    def transforms(self) -> Tuple[Transforms]:
+        return self._transforms, self._pair_transforms
 
     def save(self, filepath: str) -> None:
         base_path = filepath.rsplit('.', 1)[0]

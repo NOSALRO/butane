@@ -16,10 +16,11 @@ class Dataset(torch.utils.data.Dataset):
     ) -> None:
 
         super().__init__()
-        self.data = torch.tensor([]) if data is None else data.detach().clone().float()
+        self.data = torch.tensor([]) if data is None else data.detach().clone()
         self.targets = torch.tensor([]) if targets is None else targets.detach().clone()
         self._device = device
         self._transforms, self._vectorized_transforms = None, None
+        self._target_transforms, self._vectorized_target_transforms = None, None
         self._on_demand_device_load = on_demand_device_load
         self._return_tuple = return_tuple
         if not self._on_demand_device_load:
@@ -41,7 +42,14 @@ class Dataset(torch.utils.data.Dataset):
 
         if self._has_targets():
             _targets = self.targets[idx]
-            _targets = _targets.to(_data.device)
+
+            if isinstance(idx, int):
+                _targets = _targets if self._target_transforms is None else self._target_transforms(_targets)
+            else:
+                _targets = _targets if self._target_transforms is None else self._vectorized_target_transforms(_targets)
+
+            if self._on_demand_device_load:
+                _targets = _targets.to(_data.device)
             return self._convert_to_tuple({"data": _data, "targets": _targets})
         else:
             return self._convert_to_tuple({ "data": _data })
@@ -61,7 +69,7 @@ class Dataset(torch.utils.data.Dataset):
             on_demand_device_load=self._on_demand_device_load,
             device=self._device,
             return_tuple=self._return_tuple)
-        splitted_ds.set_transforms(_transforms)
+        splitted_ds.set_transforms(transforms=_transforms, target_transforms=self._target_transforms)
         return splitted_ds
 
     def flatten(self, dim: int = 1) -> None:
@@ -110,12 +118,16 @@ class Dataset(torch.utils.data.Dataset):
         if self._has_targets():
             self.targets = self.targets[mask]
 
-    def set_transforms(self, transforms: Transforms):
-        self._transforms = transforms
-        self._vectorized_transforms = torch.vmap(transforms)
+    def set_transforms(self, transforms: Optional[Transforms] = None, target_transforms: Optional[Transforms] = None):
+        if transforms is not None:
+            self._transforms = transforms
+            self._vectorized_transforms = torch.vmap(transforms)
+        if target_transforms is not None:
+            self._target_transforms = target_transforms
+            self._vectorized_target_transforms = torch.vmap(target_transforms)
 
-    def transforms(self) -> Transforms:
-        return self._transforms
+    def transforms(self) -> Tuple[Transforms]:
+        return self._transforms, self._target_transforms
 
     def size(self, dim: Optional[int] = None) -> Union[List[int], int]:
         return list(self.data.size(dim)) if dim is None else self.data.size(dim)

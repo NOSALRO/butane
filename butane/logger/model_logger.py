@@ -20,6 +20,12 @@ try:
 except ImportError:
     _HAS_WANDB = False
 
+try:
+    import imageio
+    _HAS_IMAGEIO = True
+except ImportError:
+    _HAS_IMAGEIO = False
+
 
 class _LiteralDumper(yaml.SafeDumper):
     pass
@@ -122,17 +128,18 @@ class ModelLogger:
         self._use_wandb = _HAS_WANDB and use_wandb
         if self._use_wandb:
             project = os.environ.get("WANDB_PROJECT")
+            name = os.environ.get("WANDB_RUN")
             assert project is not None, "Set the WANDB_PROJECT env variable"
 
             id_file = self.fpath / "wandb_id.txt"
             self._wandb_defined_metrics = set()
             if id_file.exists() and resume:
                 run_id = id_file.read_text().strip()
-                run_name = self.fpath.name
+                run_name = f"{self.fpath.name}_{run_id}" if name is None else name
                 self.logger.info(f"Resuming existing WandB Run ID: {run_id}")
             else:
                 run_id = wandb.util.generate_id()
-                run_name = f"{self.fpath.name}_{run_id}"
+                run_name = f"{self.fpath.name}_{run_id}" if name is None else name
                 id_file.write_text(run_id)
                 self.logger.info(f"Created new WandB Run ID: {run_id}")
 
@@ -236,6 +243,7 @@ class ModelLogger:
             self._last_used_path = ckpt_folder
             self._output_path = str(ckpt_folder / "outputs")
             self.logger.info(f"State restored from step {self._step}. Output path set.")
+        return checkpoint
 
     def enable_rollback(
         self,
@@ -288,9 +296,9 @@ class ModelLogger:
         self._config.update(clean_config)
         self.save_config(self.fpath)
 
-    def add_analysis(self, name: str, data: Dict[str, List], step: Optional[int] = None):
+    def add_analysis(self, name: str, data: Dict[str, List]):
 
-        current_step = step if step is not None else self._step
+        current_step = self._step
         analysis_dir = self._last_used_path
         if analysis_dir is None:
             analysis_dir = self.fpath / "analysis"
@@ -312,10 +320,9 @@ class ModelLogger:
             table = wandb.Table(columns=keys, data=rows)
             wandb.log({f"analysis/{name}_{current_step}": table}, step=current_step)
 
-    def add_image(self, name: str, image: Any, step: Optional[int] = None, **kwargs):
+    def add_image(self, name: str, image: Any, **kwargs):
 
-        current_step = step if step is not None else self._step
-
+        current_step = self._step
         if self._output_path is not None:
             save_dir = Path(self._output_path)
         else:
@@ -337,29 +344,43 @@ class ModelLogger:
             w_img = wandb.Image(str(file_path), caption=f"{name} (Step {current_step})")
             wandb.log({f"images/{name}": w_img}, step=current_step)
 
-    def add_video(self, name: str, video_path: str, step: Optional[int] = None):
+    def add_video(
+        self,
+        name: str,
+        video: Union[str, np.array],
+    ):
 
-        current_step = step if step is not None else self._step
-
+        current_step = self._step
         if self._output_path:
             save_dir = Path(self._output_path)
         else:
             save_dir = self.fpath / "outputs"
             save_dir.mkdir(parents=True, exist_ok=True)
 
-        src = Path(video_path)
-        if not src.exists():
-            self.logger.error(f"Video file {src} not found.")
-            return
+        fmt = "mp4"
+        if isinstance(video, str):
+            video = Path(video)
+            if not src.exists():
+                self.logger.error(f"Video file {src} not found.")
+                return
 
-        extension = src.suffix # e.g. .mp4 or .gif
-        filename = f"{name}_{current_step}{extension}"
-        dst = save_dir / filename
+            extension = video.suffix # e.g. .mp4 or .gif
+            filename = f"{name}_{current_step}{extension}"
+            fmt = extension.lstrip(".")
+        else:
+            if not _HAS_IMAGEIO:
+                self.logger.warning(f"ImageIO lib does not exist; Video will not be created.")
+                return
+            else:
+                imageio.mimwrite(save_dir / name, video, fps=30, quality=8)
+                video = save_dir / name
 
         if self._use_wandb:
-            fmt = extension.lstrip(".")
-            w_vid = wandb.Video(str(src), caption=f"{name} (Step {current_step})", format=fmt)
+            w_vid = wandb.Video(video, caption=f"{name} (Step {current_step})", fps=30, format=fmt)
             wandb.log({f"videos/{name}": w_vid}, step=current_step)
+
+    def set_step(self, step: int):
+        self._step = step
 
     def save_config(self, fpath: str) -> None:
         with open(f'{fpath}/config.yaml', 'w', encoding='utf-8') as f:

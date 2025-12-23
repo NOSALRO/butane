@@ -3,7 +3,7 @@ from functools import reduce
 import torch
 from ..._typedefs import *
 from ..modules.mlp_block import MLPBlock
-from ..modules.embeddings import SinusoidalEmbeddings
+from ..modules.embeddings import SinusoidalEmbeddings, FourierEmbeddings
 from ..utils import utils
 from ..wrapper.x_dependent import XDependentSequential
 from ..._utils import apply_recursively
@@ -66,7 +66,7 @@ class TimeMLP(torch.nn.Module):
             if self._simplified:
                 self._time_emb_dim = 1 # Scalar concatenation
             else:
-                self.time_embedder = SinusoidalEmbeddings(time_embedding_size)
+                self.time_embedder = FourierEmbeddings(time_embedding_size)
                 self.embedding_projection = MLPBlock(
                     input_dims=time_embedding_size,
                     output_dims=self._internal_dim, # Match D for addition
