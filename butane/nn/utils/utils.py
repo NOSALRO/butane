@@ -107,7 +107,7 @@ def load_state(
     optimizer: Optional[torch.optim.Optimizer] = None,
     lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
     ema: ModuleParams = None,
-    scaler: Optional[torch.nn.Module] = None
+    **modules,
 ):
 
     def __load(obj, key):
@@ -146,6 +146,7 @@ def load_state(
     returns["optimizer"] = __load(optimizer, "optimizer")
     returns["ema"] = __load(ema, "ema")
     returns["lr_scheduler"] = __load(lr_scheduler, "lr_scheduler")
-    returns["scaler"] = __load(scaler, "scaler")
+    for k,v in modules.items():
+        returns.update({k: __load(v, k)})
 
     return returns

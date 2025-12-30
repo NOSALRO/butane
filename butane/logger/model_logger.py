@@ -159,7 +159,7 @@ class ModelLogger:
         optimizer: Optional[torch.optim.Optimizer] = None,
         lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
         ema: ModuleParams = None,
-        scaler: Optional[torch.nn.Module] = None,
+        **modules,
     ):
 
         assert isinstance(step, int), f"'step' must be int, got {type(step).__name__}"
@@ -179,8 +179,6 @@ class ModelLogger:
             assert is_sched(lr_scheduler) or is_sched_list(lr_scheduler), "`lr_scheduler` must be a torch.optim.lr_scheduler.LRScheduler or list/tuple of them."
         if ema is not None:
             assert is_mod(ema) or is_mod_list(ema), "`ema` must be a torch.nn.Module or list/tuple of torch.nn.Modules."
-        if scaler is not None:
-            assert isinstance(scaler, torch.nn.Module), "`scaler` must be a torch.nn.Module or None."
 
         _path = self.fpath / f"checkpoint_{step}"
         output_path = _path / "outputs/"
@@ -192,8 +190,9 @@ class ModelLogger:
             **self._create_dict(optimizer, "optimizer"),
             **self._create_dict(lr_scheduler, "lr_scheduler"),
             **self._create_dict(ema, "ema"),
-            **self._create_dict(scaler, "scaler"),
         )
+        for k,v in modules.items():
+            cp.update(**self._create_dict(v, k))
 
         if getattr(self, '_use_rollback', False) and self._rollback_monitor:
             cp['monitor_state'] = self._rollback_monitor.state()
@@ -214,7 +213,7 @@ class ModelLogger:
         optimizer: Optional[torch.optim.Optimizer] = None,
         lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
         ema: ModuleParams = None,
-        scaler: Optional[torch.nn.Module] = None,
+        **modules,
     ):
         ckpt_folder = self.fpath.absolute() / f"checkpoint_{step}"
 
@@ -227,7 +226,8 @@ class ModelLogger:
             model=model,
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
-            ema=ema, scaler=scaler
+            ema=ema,
+            **modules,
         )
 
         loaded_step = checkpoint.get("step")
@@ -320,6 +320,26 @@ class ModelLogger:
             table = wandb.Table(columns=keys, data=rows)
             wandb.log({f"analysis/{name}_{current_step}": table}, step=current_step)
 
+    def add_plot(self, name: str, plot: Any, **kwargs):
+
+        current_step = self._step
+        if self._output_path is not None:
+            save_dir = Path(self._output_path)
+        else:
+            save_dir = self.fpath / "outputs"
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path = save_dir / name
+
+        if hasattr(plot, 'savefig'):
+            plot.savefig(file_path, **kwargs)
+        else:
+            self.logger.error("Object passed to add_plot has no .save() or .savefig() method.")
+            return
+
+        if self._use_wandb:
+            wandb.log({f"plot/{name}": plot}, step=current_step)
+
     def add_image(self, name: str, image: Any, **kwargs):
 
         current_step = self._step
@@ -382,6 +402,11 @@ class ModelLogger:
     def set_step(self, step: int):
         self._step = step
 
+    def step(self):
+        self._step += 1
+        if self._use_wandb:
+            wandb.log({"step": self._step}, step=self._step)
+
     def save_config(self, fpath: str) -> None:
         with open(f'{fpath}/config.yaml', 'w', encoding='utf-8') as f:
             yaml.dump(self._config, f, sort_keys=False, allow_unicode=True, Dumper=_LiteralDumper)
@@ -413,10 +438,12 @@ class ModelLogger:
         if obj is None:
             return { key: None}
         if not isinstance(obj, (list, tuple)):
+            assert hasattr(obj, "state_dict"), "Object does not have state_dict()"
             return { key: obj.state_dict()}
         else:
             out_dict = {}
             for i, o in enumerate(obj, start=1):
+                assert hasattr(o, "state_dict"), "Object does not have state_dict()"
                 out_dict.update({f'{key}_{i}': o.state_dict()})
             return out_dict
 
