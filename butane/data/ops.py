@@ -112,3 +112,55 @@ def trim(dataset: butane.data.Dataset, threshold) -> butane.data.Dataset:
     dataset.data = data[:, start_index:end_index + 1, ...]
 
     return dataset
+
+def randperm(
+    n: int,
+    seed: Optional[int] = None,
+    y: Optional[torch.Tensor] = None,
+    respect_targets: bool = False,
+) -> torch.Tensor:
+
+    if isinstance(y, torch.Tensor):
+        targets = y
+    else:
+        raise ValueError(f"Unsupported type for y: {type(y)}")
+
+    generator = None
+    if seed is not None:
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+
+    if respect_targets:
+        if targets is None:
+            warnings.warn("respect_targets=True but no targets found. Falling back to random shuffle.", UserWarning)
+            respect_targets = False
+        elif targets.dim() > 1:
+            warnings.warn("respect_targets=True but targets are multi-dimensional. Falling back to random shuffle.", UserWarning)
+            respect_targets = False
+        elif len(targets) != n:
+             warnings.warn(f"Target length ({len(targets)}) does not match data length ({n}). Falling back to random shuffle.", UserWarning)
+             respect_targets = False
+
+    if not respect_targets:
+        return torch.randperm(n, generator=generator)
+
+    unique_classes, inverse_indices = torch.unique(targets, return_inverse=True)
+    num_classes = len(unique_classes)
+    ranks = torch.zeros(n, device=targets.device) # float64 for precision
+
+    for i, cls_val in enumerate(unique_classes):
+        mask = (targets == cls_val)
+        count = mask.sum().item()
+        if count == 0: continue
+        perm = torch.randperm(count, generator=generator, device=targets.device)
+        # Calculate the base rank: 0, 1, 2...
+        # Add the class offset: i / num_classes
+        # If Class A is 0 and Class B is 1 (out of 2 classes):
+        # Class A ranks: 0.0, 1.0, 2.0...
+        # Class B ranks: 0.5, 1.5, 2.5...
+        class_offset = i / num_classes
+        class_ranks = perm.float() + class_offset
+        ranks[mask] = class_ranks
+
+    sorted_indices = torch.argsort(ranks)
+    return sorted_indices
