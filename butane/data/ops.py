@@ -27,7 +27,8 @@ def drop_to_max_size(
     X: Union[butane.data.Dataset, torch.Tensor],
     max_size: int,
     respect_targets: bool = False,
-    y: Optional[torch.Tensor] = None
+    y: Optional[torch.Tensor] = None,
+    seed: Optional[int] = None,
 ) -> None:
 
     if isinstance(X, butane.data.Dataset):
@@ -37,13 +38,18 @@ def drop_to_max_size(
         data = X
         targets = y
 
+    generator = None
+    if seed is not None:
+        generator = torch.Generator(device=data.device)
+        generator.manual_seed(seed)
+
     if max_size >= len(data):
         return X, y
     if respect_targets and targets is not None and targets.dim() > 1:
         warnings.warn("butane.data.ops.drop_to_max_size: Targets are not class labels or they were not provied, respect_targets is now False", UserWarning)
         respect_targets = False
     if not respect_targets:
-        idx_to_keep = torch.randperm(len(data))[:max_size]
+        idx_to_keep = torch.randperm(len(data), generator=generator)[:max_size]
         data = data[idx_to_keep]
         if targets is not None:
             targets = targets[idx_to_keep]
@@ -53,7 +59,7 @@ def drop_to_max_size(
         new_data, new_targets = [], []
         for _t in unique_targets:
             _selected_data = data[targets == _t]
-            _selected_data = _selected_data[torch.randperm(_selected_data.size(0))[:instances_per_target]]
+            _selected_data = _selected_data[torch.randperm(_selected_data.size(0), generator=generator)[:instances_per_target]]
             new_data.append(_selected_data)
             new_targets.append(
                 torch.full(
@@ -64,7 +70,7 @@ def drop_to_max_size(
                 ))
         new_data = torch.cat(new_data, dim=0)
         new_targets = torch.cat(new_targets, dim=0)
-        shuffle = torch.randperm(new_data.size(0))
+        shuffle = torch.randperm(new_data.size(0), generator=generator)
         data = new_data[shuffle]
         targets = new_targets[shuffle]
     if isinstance(X, butane.data.Dataset):
