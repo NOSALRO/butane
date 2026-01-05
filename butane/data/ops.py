@@ -120,10 +120,11 @@ def randperm(
     respect_targets: bool = False,
 ) -> torch.Tensor:
 
-    if isinstance(y, torch.Tensor):
-        targets = y
-    else:
-        raise ValueError(f"Unsupported type for y: {type(y)}")
+    if y is not None:
+        if isinstance(y, torch.Tensor):
+            targets = y
+        else:
+            raise ValueError(f"Unsupported type for y: {type(y)}")
 
     generator = None
     if seed is not None:
