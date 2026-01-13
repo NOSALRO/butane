@@ -3,13 +3,13 @@ import math
 import torch
 import numpy as np
 
-def make_spiral(n_samples: int = 10_000, max_theta: float = 5*np.pi, is_3d: bool = False) -> torch.Tensor:
+def make_spiral(n_samples: int = 10_000, max_theta: float = 5*np.pi, sigma: float = 0.01, is_3d: bool = False) -> torch.Tensor:
     theta = np.linspace(0., max_theta, n_samples)
     r = np.linspace(0, 1, n_samples)
     spiral = np.array([r*np.cos(theta), r*np.sin(theta)]).T
     if is_3d:
         spiral = np.concatenate((spiral, np.linspace(0, 1, n_samples)[:,None]), axis=-1)
-    spiral += 0.01 * np.random.randn(*spiral.shape)
+    spiral += sigma * np.random.randn(*spiral.shape)
     return torch.tensor(spiral).float()
 
 def make_eight_normal(
