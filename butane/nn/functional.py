@@ -69,6 +69,8 @@ def pgm(
 
     alpha = epsilon / steps
     x_init = x.detach().clone()
+    x_prime = x_init.clone()
+    perturbed_x = x_init.clone()
 
     if random_start:
         noise = torch.empty_like(perturbed_x).uniform_(-epsilon, epsilon)
@@ -76,8 +78,6 @@ def pgm(
         if clip_range is not None:
             perturbed_x = torch.clamp(perturbed_x, min=clip_range[0], max=clip_range[1])
 
-    x_prime = x_init.clone()
-    perturbed_x = x_init.clone()
     for _ in range(steps):
         x_prime = fgm(
             perturbed_x,
