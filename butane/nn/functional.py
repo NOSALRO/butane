@@ -64,10 +64,17 @@ def pgm(
     steps: int = 10,
     clip_range: Optional[List[float]] = None,
     use_sign: bool = False,
+    random_start: bool = True,
 ) -> torch.Tensor:
 
     alpha = epsilon / steps
     x_init = x.detach().clone()
+
+    if random_start:
+        noise = torch.empty_like(perturbed_x).uniform_(-epsilon, epsilon)
+        perturbed_x = x_init + noise
+        if clip_range is not None:
+            perturbed_x = torch.clamp(perturbed_x, min=clip_range[0], max=clip_range[1])
 
     x_prime = x_init.clone()
     perturbed_x = x_init.clone()
