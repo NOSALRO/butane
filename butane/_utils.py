@@ -85,7 +85,7 @@ def checkerboard_mask(x: torch.Tensor, tile_size: int) -> torch.Tensor:
     tile_pattern = torch.block_diag(torch.ones((tile_size, tile_size)), torch.ones((tile_size, tile_size)))
     mask = tile_pattern.repeat(num_tiles//2, num_tiles//2)
     mask = mask[:height, :width]
-    return (x * mask).to(x.dtype)
+    return (x * mask.to(x.device)).to(x.dtype)
 
 def random_mask(x: torch.Tensor, tile_size: int) -> torch.Tensor:
     height, width = x.shape[-2:]
@@ -99,4 +99,4 @@ def random_mask(x: torch.Tensor, tile_size: int) -> torch.Tensor:
     tile_block = torch.ones((tile_size, tile_size))
     mask = torch.kron(tile_pattern, tile_block)
     mask = mask[:height, :width]
-    return (x * mask).to(x.dtype)
+    return (x * mask.to(x.device)).to(x.dtype)
