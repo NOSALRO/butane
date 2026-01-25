@@ -3,14 +3,29 @@ import math
 import torch
 import numpy as np
 
-def make_spiral(n_samples: int = 10_000, max_theta: float = 5*np.pi, sigma: float = 0.01, is_3d: bool = False) -> torch.Tensor:
+def make_spiral(
+    n_samples: int = 10_000,
+    max_theta: float = 5*np.pi,
+    sigma: float = 0.01,
+    regression: bool = False,
+    seq_len: int = 5,
+    is_3d: bool = False
+) -> torch.Tensor:
     theta = np.linspace(0., max_theta, n_samples)
     r = np.linspace(0, 1, n_samples)
     spiral = np.array([r*np.cos(theta), r*np.sin(theta)]).T
     if is_3d:
         spiral = np.concatenate((spiral, np.linspace(0, 1, n_samples)[:,None]), axis=-1)
     spiral += sigma * np.random.randn(*spiral.shape)
-    return torch.tensor(spiral).float()
+    spiral_tensor = torch.tensor(spiral).float()
+    if not regression:
+        return spiral_tensor
+
+    num_valid_samples = n_samples - seq_len
+    data = spiral_tensor[:num_valid_samples] # (N, 2)
+    targets_view = spiral_tensor[1:].unfold(0, seq_len, 1)
+    targets = targets_view[:num_valid_samples].permute(0, 2, 1)
+    return data, targets
 
 def make_eight_normal(
     n_samples: int = 10_000,
