@@ -42,6 +42,25 @@ class Scaler(ABC, torch.nn.Module):
             out = out.squeeze(0)
         return out
 
+class DummyScaler(Scaler):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def fit(
+        self,
+        X: torch.Tensor,
+        dims: Union[int, Tuple[int]] = (1,),
+        transforms: Optional[Callable] = None
+    ) -> None:
+        self.is_fitted = True
+
+    def _scale(self, x: torch.Tensor) -> torch.Tensor:
+        return x
+
+    def _unscale(self, x: torch.Tensor) -> torch.Tensor:
+        return x
+
 class StandardScaler(Scaler):
 
     def __init__(self) -> None:

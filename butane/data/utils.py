@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, Iterator
 import torch
 
 @torch.jit.script
@@ -37,3 +37,8 @@ def batch_arange(
         aranges.append(torch.arange(start, stop, step, dtype=torch.int64).unsqueeze(0))
 
     return torch.vstack(aranges)
+
+def InfiniteIterator(dataloader: torch.utils.data.DataLoader) -> Iterator:
+    while True:
+        for sample in dataloader:
+            yield sample

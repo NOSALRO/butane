@@ -3,7 +3,7 @@ import copy
 import torch
 
 from .dataset import Dataset
-from .._utils import batch_arange
+from ..utils import batch_arange
 
 
 class TrajectoryDataset(Dataset):
