@@ -66,37 +66,64 @@ class UpsampleNd(torch.nn.Module):
         self,
         input_dims: IntParams,
         output_channels: Optional[int] = None,
+        use_deconv: bool = False,
         refine: bool = False
     ):
         super().__init__()
         if output_channels is None:
             output_channels = input_dims[0]
 
+        self._use_deconv = use_deconv
+        if self._use_deconv:
+            _kernel_size = 4 if self.dims != 3 else (3, 4, 4)
+            _stride = 4 if self.dims != 3 else (1, 2, 2)
+
+            # Using kernel_size = stride ensures exact doubling without overlapping artifacts
+            self.upsample_layer = self.conv_transpose(
+                in_channels=input_dims[0], 
+                out_channels=output_channels, 
+                kernel_size=_stride, 
+                stride=_stride,
+                padding=1,
+            )
         if self.dims < 3:
             self.upsample_layer = torch.nn.Upsample(scale_factor=2, mode='nearest')
 
         if refine:
-            self.refinement_layer = self.conv(input_dims[0], output_channels, 3, padding=1)
+            _refine_in_channels = output_channels if self._use_deconv else input_dims[0]
+            self.refinement_layer = self.conv(_refine_in_channels, output_channels, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.dims == 3:
-            h = torch.nn.functional.interpolate(x, (x.shape[2], x.shape[3] * 2, x.shape[4] * 2), mode="nearest")
-        else:
+        if self._use_deconv:
             h = self.upsample_layer(x)
+        else:
+            if self.dims == 3:
+                h = torch.nn.functional.interpolate(
+                    x,
+                    (x.shape[2], x.shape[3] * 2, x.shape[4] * 2), 
+                    mode="nearest"
+                )
+            else:
+                h = self.upsample_layer(x)
+
         if hasattr(self, 'refinement_layer'):
             h = self.refinement_layer(h)
+
         return h
 
 class Upsample1d(UpsampleNd):
     conv = torch.nn.Conv1d
+    conv_transpose = torch.nn.ConvTranspose1d
     dims = 1
 
 class Upsample2d(UpsampleNd):
     conv = torch.nn.Conv2d
+    conv_transpose = torch.nn.ConvTranspose2d
     dims = 2
 
 class Upsample3d(UpsampleNd):
     conv = torch.nn.Conv3d
+    conv_transpose = torch.nn.ConvTranspose3d
     dims = 3
 
 class ResBlockNd(XDependent):
@@ -299,6 +326,11 @@ class CrossAttentionCondition(XDependent):
         self.cross_attention = attention(input_dims)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+        if c is None:
+            return x
+        if c.ndim == 2:
+            while c.dim() != x.dim():
+                c = c[..., None]
         return self.cross_attention(x1=x, x2=c)
 
 # TOOD: Fix input size handling
@@ -325,6 +357,7 @@ class UNetNd(torch.nn.Module):
         dropout: float = 0.0,
         resample_with_resblock: bool = False,
         conv_resample: bool = True,
+        deconv_upsample: bool = False,
         zero_conv: bool = True,
         attention: bool = False,
         attention_channel_idx: IntParams = [],
@@ -374,6 +407,23 @@ class UNetNd(torch.nn.Module):
         self._condition_add = condition_add
         self._condition_concat_projection = condition_concat_projection
         self._pretrained_condition_module = pretrained_condition_module
+        self._is_flat_condition = isinstance(self._condition_input_dims, (list, tuple)) and len(self._condition_input_dims) == 1
+
+        # if self._is_flat_condition and self._condition_concat and self._use_film:
+        #     raise ValueError(
+        #         "For flat embeddings, `condition_concat` and `use_film` cannot both be True. "
+        #         "Choose one method to fuse the condition vector with the global embedding."
+        #     )
+
+        if self._condition_cross_attention and not self._condition_projection and condition_projection_module is None:
+            # We must verify the input isn't a complex data structure like a Dict or list of shapes
+            _is_multi_modal = isinstance(self._condition_input_dims, dict) or \
+                              (isinstance(self._condition_input_dims, (list, tuple)) and len(self._condition_input_dims) > 0 and isinstance(self._condition_input_dims[0], (list, tuple)))
+            if _is_multi_modal:
+                raise ValueError(
+                    "Cannot use `condition_cross_attention=True` directly on unprojected multi-modal inputs (Dict/List). "
+                    "The attention blocks require a single tensor. Please enable `condition_projection=True` or provide a custom module."
+                )
 
         if self._condition_cross_attention:
             assert not self._condition_concat_projection, \
@@ -381,10 +431,55 @@ class UNetNd(torch.nn.Module):
 
         assert not (self._condition_concat and self._condition_add), "Condition concat and add cannot be enabled together; Please use one."
 
-        spatial_match = lambda s1, s2: tuple(s1[1:]) == tuple(s2[1:])
-        full_match = lambda s1, s2: tuple(s1) == tuple(s2)
+        spatial_match = lambda s1, s2: tuple(s1[1:]) == tuple(s2[1:]) # Check spatial dims
+        full_match = lambda s1, s2: tuple(s1) == tuple(s2) # Check size
 
-        if (self._condition_projection or self._condition_cross_attention) and condition_projection_module is None:
+        # Create time embedding modules.
+        if self._time_dependent:
+            self._time_embedding_size = time_embedding_size if time_embedding_size is not None else channels[0]
+            self._embedding_size = embedding_size if embedding_size is not None else self._time_embedding_size * 4
+
+            embedder = FourierEmbeddings if embedder is None else embedder
+            self.time_embedder = embedder(d_model=self._time_embedding_size, learnable=learn_embeddings)
+
+            self.embedding_projection = MLPBlock(
+                    input_dims=self._time_embedding_size,
+                    output_dims=self._embedding_size,
+                    hidden_dims=[self._embedding_size],
+                    activation_function=[torch.nn.SiLU()],
+                    output_activation=False,
+            )
+        else:
+            self._time_embedding_size = None
+            self._embedding_size = None
+
+        # When embedding is directly used as condition
+        if self._is_flat_condition and not self._condition_projection and condition_projection_module is None:
+
+            # 1. Validate FiLM dimensions
+            if self._use_film and not self._condition_concat:
+                if self._condition_input_dims[0] != (self._embedding_size * 2):
+                    raise ValueError(
+                        f"use_film=True without condition_projection requires the condition dimension ({self._condition_input_dims[0]}) "
+                        f"to be exactly 2x embedding_size ({self._embedding_size * 2}) so it can be chunked into scale and shift. "
+                        f"Either set condition_projection=True, use condition_concat=True, or adjust your condition input size."
+                    )
+
+            # 2. Validate Addition dimensions
+            elif self._condition_add:
+                if self._condition_input_dims[0] != self._embedding_size:
+                    raise ValueError(
+                        f"condition_add=True without condition_projection requires the condition dimension ({self._condition_input_dims[0]}) "
+                        f"to exactly match embedding_size ({self._embedding_size})."
+                    )
+
+            # 3. Update global embedding size for Down/Up blocks if concatenating
+            if self._condition_concat:
+                self._embedding_size += self._condition_input_dims[0]
+
+        # Check if cond input is more than 1. If True then the user should specify a custom encoding-projection module.
+        # Otherwise, set up the conditioning path.
+        elif (self._condition_projection or self._condition_cross_attention) and condition_projection_module is None:
             is_multi_modal = False
             if isinstance(self._condition_input_dims, dict):
                 is_multi_modal = True
@@ -394,11 +489,12 @@ class UNetNd(torch.nn.Module):
                  raise ValueError("Default projection blocks do not support multi-modal (Dict/List) input dimensions. "
                                   "Please provide a custom 'condition_projection_module' to handle this input.")
 
+            # Can we concat?
             if self._condition_concat and len(self._condition_input_dims) != len(self._input_dims):
                 self._condition_concat = False
                 warnings.warn("Concat condition is disabled; Concat condition can not be used with conditions of different modalities (different rank).", UserWarning)
 
-            if len(self._condition_input_dims) == 2:
+            elif len(self._condition_input_dims) == 2:
                 self.condition_block = ConditionProjectionBlock1d
             elif len(self._condition_input_dims) == 3:
                 self.condition_block = ConditionProjectionBlock2d
@@ -429,7 +525,8 @@ class UNetNd(torch.nn.Module):
                                   f"Input: {self._input_dims}, Condition Config: {self._condition_input_dims}")
 
 
-        if self._condition_concat:
+        # Check if concating channel-wise is possible w.r.t the spatial dims.
+        if self._condition_concat and not self._is_flat_condition:
             extra_channels = 0
 
             if isinstance(self._condition_input_dims, dict):
@@ -468,39 +565,34 @@ class UNetNd(torch.nn.Module):
             zero_out=zero_conv,
         )
 
-        if self._time_dependent:
-            self._time_embedding_size = time_embedding_size if time_embedding_size is not None else channels[0]
-            self._embedding_size = embedding_size if embedding_size is not None else self._time_embedding_size * 4
-
-            embedder = FourierEmbeddings if embedder is None else embedder
-            self.time_embedder = embedder(d_model=self._time_embedding_size, learnable=learn_embeddings)
-
-            self.embedding_projection = MLPBlock(
-                    input_dims=self._time_embedding_size,
-                    output_dims=self._embedding_size,
-                    hidden_dims=[self._embedding_size],
-                    activation_function=[torch.nn.SiLU()],
-                    output_activation=False,
-            )
-        else:
-            self._time_embedding_size = None
-            self._embedding_size = None
-
         self._condition_output_dims = None
         if self._condition_projection or self._condition_cross_attention:
             if condition_projection_module is None:
-                self.condition_projection_block = self.condition_block(
-                    input_dims=self._condition_input_dims,
-                    channels=self._channels[0],
-                    embedding_size=self._embedding_size,
-                    dropout=condition_dropout,
-                    n_residual_blocks=condition_n_residuals,
-                    n_downsamples=condition_n_downsamples,
-                    zero_out=zero_conv,
-                    use_film=self._use_film and (not self._condition_concat_projection),
-                    attention=_attention_module if condition_attention else None,
-                    linear_projection=not self._condition_cross_attention,
-                )
+                if self._is_flat_condition:
+                    _out_dim = self._embedding_size * 2 if (self._use_film and not self._condition_concat) else self._embedding_size
+                    self.condition_projection_block = MLPBlock(
+                        input_dims=self._condition_input_dims[0],
+                        output_dims=_out_dim,
+                        hidden_dims=[self._embedding_size],
+                        activation_function=[torch.nn.SiLU()],
+                        output_activation=False,
+                        zero_out=zero_conv,
+                    )
+                    self._condition_output_dims = [_out_dim]
+                    self._bypass_capable = True
+                else:
+                    self.condition_projection_block = self.condition_block(
+                        input_dims=self._condition_input_dims,
+                        channels=self._channels[0],
+                        embedding_size=self._embedding_size,
+                        dropout=condition_dropout,
+                        n_residual_blocks=condition_n_residuals,
+                        n_downsamples=condition_n_downsamples,
+                        zero_out=zero_conv,
+                        use_film=self._use_film and (not self._condition_concat_projection),
+                        attention=_attention_module if condition_attention else None,
+                        linear_projection=not self._condition_cross_attention,
+                    )
             else:
                 self.condition_projection_block = XDependentSequential(condition_projection_module)
                 _condition_module_output_dims = utils.calculate_output_size(self.condition_projection_block, input_dims=self._condition_input_dims)
@@ -610,7 +702,8 @@ class UNetNd(torch.nn.Module):
                 _subblock.append(CrossAttentionCondition(_middle_block_input_dims[0], _cross_attention_module))
             self.middle_blocks.append(_subblock)
 
-        self._bottleneck_res = copy.deepcopy(_middle_block_input_dims).numpy().tolist()
+        _mid_dims = copy.deepcopy(_middle_block_input_dims)
+        self._bottleneck_res = _mid_dims.numpy().tolist() if hasattr(_mid_dims, 'numpy') else list(_mid_dims)
         self.upsample_blocks = torch.nn.ModuleList([])
         _upsample_input_dims = copy.deepcopy(_middle_block_input_dims)
         for i, ch in reversed(list(enumerate(self._channels))):
@@ -644,7 +737,7 @@ class UNetNd(torch.nn.Module):
                             upsample=True,
                             zero_out=zero_conv,
                         ) if self._resample_with_resblock
-                        else self.upsample(_upsample_input_dims, refine=conv_resample, output_channels=ch)
+                        else self.upsample(_upsample_input_dims, use_deconv=deconv_upsample, refine=conv_resample, output_channels=ch)
                     )
                     _upsample_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_upsample_input_dims)
                 self.upsample_blocks.append(XDependentSequential(*_subblock))
@@ -669,10 +762,12 @@ class UNetNd(torch.nn.Module):
 
     def _prepare_time(self, t: Optional[torch.Tensor] = None) -> torch.Tensor:
         emb = None
-        if t is not None:
-            assert self._time_dependent, "Time dependency is not enabled, but time was provided"
+        if self._time_dependent:
+            if t is None: raise ValueError("Model is configured as `time_dependent=True`, but time step `t` is None.")
             emb = self.time_embedder(t)
             emb = self.embedding_projection(emb)
+        elif t is not None:
+            raise ValueError("Model is configured as `time_dependent=False`, but time step `t` was provided.")
         return emb
 
     def _prepare_labels(
@@ -725,25 +820,63 @@ class UNetNd(torch.nn.Module):
         emb = self._prepare_labels(emb=emb, y=y, batch_size=x.shape[0], device=x.device)
         c_emb = None
 
-        if self._condition_concat or self._condition_add:
-            compatible = lambda t1, t2: (t1.ndim == t2.ndim and t1.shape[2:] == t2.shape[2:] and not self._condition_add) \
-                    or (t1.ndim == t2.ndim and t1.shape[1:] == t2.shape[1:])
+        if getattr(self, "_is_flat_condition", False) and (c is not None or z is not None):
+            if z is not None:
+                c_emb = z
+            else:
+                c_emb = self.condition_projection_block(c) if self._condition_projection else c
 
-            if isinstance(c, torch.Tensor):
-                if compatible(x, c):
-                    x = torch.cat([x, c], dim=1) if self._condition_concat else x + c
+            if c_emb is not None:
+                if emb is None:
+                    emb = c_emb
+                else:
+                    if self._condition_cross_attention:
+                        pass # c_emb is preserved to be passed down to CrossAttention blocks
+                    elif getattr(self, "_is_flat_condition", False) and self._condition_concat:
+                        # Flat concat routing
+                        emb = torch.cat([emb, c_emb], dim=1)
+                    elif not getattr(self, "_is_flat_condition", False) and self._condition_concat_projection:
+                        # Spatial concat projection routing
+                        emb = torch.cat((emb, c_emb), dim=1)
+                    elif self._use_film:
+                        # Dynamic shape check for FiLM (catches bad 'z' bypasses)
+                        if c_emb.shape[1] != emb.shape[1] * 2:
+                            raise ValueError(
+                                f"FiLM runtime error: condition embedding size ({c_emb.shape[1]}) must be "
+                                f"exactly 2x the time embedding size ({emb.shape[1] * 2}). "
+                                f"If you are passing a bypass `z`, ensure it is pre-projected correctly."
+                            )
+                        c_gamma, c_beta = c_emb.chunk(chunks=2, dim=1)
+                        emb = emb * (1 + c_gamma) + c_beta
+                    else:
+                        # Fallback to Addition
+                        if c_emb.shape[1] != emb.shape[1]:
+                            raise ValueError(
+                                f"Addition runtime error: condition embedding size ({c_emb.shape[1]}) "
+                                f"must exactly match the time embedding size ({emb.shape[1]})."
+                            )
+                        emb = emb + c_emb
 
-            elif isinstance(c, (tuple, list)):
-                for ci in c:
-                    if compatible(x, ci):
-                        x = torch.cat([x, ci], dim=1) if self._condition_concat else x + ci
+        elif not getattr(self, "_is_flat_condition", False):
+            if self._condition_concat or self._condition_add:
+                compatible = lambda t1, t2: (t1.ndim == t2.ndim and t1.shape[2:] == t2.shape[2:] and not self._condition_add) \
+                        or (t1.ndim == t2.ndim and t1.shape[1:] == t2.shape[1:])
 
-            elif isinstance(c, dict):
-                for vi in c.values():
-                    if isinstance(vi, torch.Tensor) and compatible(vi, x):
-                        x = torch.cat([x, vi], dim=1) if self._condition_concat else x + vi
+                if isinstance(c, torch.Tensor):
+                    if compatible(x, c):
+                        x = torch.cat([x, c], dim=1) if self._condition_concat else x + c
 
-        if (self._condition_projection or self._condition_cross_attention):
+                elif isinstance(c, (tuple, list)):
+                    for ci in c:
+                        if compatible(x, ci):
+                            x = torch.cat([x, ci], dim=1) if self._condition_concat else x + ci
+
+                elif isinstance(c, dict):
+                    for vi in c.values():
+                        if isinstance(vi, torch.Tensor) and compatible(vi, x):
+                            x = torch.cat([x, vi], dim=1) if self._condition_concat else x + vi
+
+        if (self._condition_projection or self._condition_cross_attention) and not getattr(self, "_is_flat_condition", False):
             if z is not None:
                 c_emb = z
             elif z is None:
@@ -837,17 +970,27 @@ class UNetNd(torch.nn.Module):
         return self
 
     def summary(self):
-
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
         # Determine conditioning mode string
         modes = []
-        if self._condition_concat: modes.append("Concatenation (Input)")
-        if self._condition_projection: modes.append("Projection (FiLM/Add)")
-        if self._condition_concat_projection: modes.append("Projection (Concat to Embedding)")
-        if self._condition_cross_attention: modes.append("Cross Attention (Spatial)")
-        if self._n_classes: modes.append(f"Class Embedding (n={self._n_classes})")
+        if getattr(self, "_is_flat_condition", False):
+            modes.append("Flat Embedding")
+            if self._condition_concat: 
+                modes.append("Concat to Global Emb")
+            elif self._condition_add: 
+                modes.append("Add to Global Emb")
+            elif self._use_film and not self._condition_projection:
+                modes.append("Direct FiLM")
+        else:
+            if self._condition_concat: modes.append("Spatial Concatenation")
+            if self._condition_add: modes.append("Spatial Addition")
+
+        if self._condition_projection: modes.append("Projection Block")
+        if self._condition_cross_attention: modes.append("Cross Attention")
+        if self._n_classes is not None: modes.append(f"Class Embedding (n={self._n_classes})")
+
         cond_mode = " + ".join(modes) if modes else "None (Unconditional)"
 
         print("-" * 75)
@@ -865,15 +1008,17 @@ class UNetNd(torch.nn.Module):
         if self._has_condition:
             print(f"  • Cond Input Shape:     {self._condition_input_dims}")
             if self._condition_output_dims is not None:
-                print(f"  • Encoded Cond Shape:   {self._condition_output_dims.numpy().tolist()} (Features for Attn/Proj)")
+                # Safe conversion: handles both PyTorch tensors and Python lists (from flat embeddings)
+                out_dims_str = self._condition_output_dims.numpy().tolist() if isinstance(self._condition_output_dims, torch.Tensor) else self._condition_output_dims
+                print(f"  • Encoded Cond Shape:   {out_dims_str} (Features for Attn/Proj)")
 
-        if self._attention or self._condition_cross_attention:
+        if self._attention or getattr(self, "_condition_cross_attention", False):
             if len(self._attention_channel_idx) > 0:
                 print("-" * 75)
                 print(f"🧠  Attention Mechanism")
                 print(f"  • Heads:                {self._attention_heads}")
                 print(f"  • Self-Attention:       Applied at channels {[(i, self._channels[i]) for i in self._attention_channel_idx]}")
-            if self._condition_cross_attention:
+            if getattr(self, "_condition_cross_attention", False):
                 print(f"  • Cross-Attention:      Applied at EVERY level (Down/Mid/Up)")
 
         print("-" * 75)
