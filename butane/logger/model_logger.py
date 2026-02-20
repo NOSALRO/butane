@@ -97,22 +97,64 @@ class _ModelMonitor:
         self.best_metrics = state.get('best_metrics', {})
 
 class ModelLogger:
+    """
+    Initializes the ModelLogger for experiment tracking, checkpointing, and cloud synchronization.
+
+    The logger manages a state machine via 'resume', 'overwrite', and 'eval_mode' to ensure
+    local and remote (WandB) data consistency.
+
+    Args:
+        fpath (str): The root directory for the experiment.
+        overwrite (bool): If True, wipes local stats and deletes the entire WandB lineage 
+            from the server. Prompts for user verification if the folder exists.
+        resume (bool): If True, attempts to load existing stats and continue the experiment. 
+            Creates a new 'branch' in WandB to avoid data overlap.
+        eval_mode (bool): If True, locks onto the existing folder without creating 
+            timestamps and disables all WandB logging. Perfect for inference scripts.
+        use_wandb (bool): Enables Weights & Biases integration. Requires 'WANDB_PROJECT' 
+            env variable.
+
+    Internal State Matrix:
+        - Safe Start (False, False, False): Creates a timestamped folder and a new WandB run.
+        - Recovery (False, True, False): Re-attaches to 'fpath', loads weights/stats, 
+            truncates 'stats.yaml' to remove post-checkpoint data, branches the WandB 
+            run with a lineage-tracking name, and replays history into the new run.
+        - Hard Reset (True, True, False): Loads weights from 'fpath', but deletes ALL 
+            previous WandB runs in the lineage and wipes local 'stats.yaml' history.
+        - Evaluation (False, False, True): Static access to 'fpath' for weight loading; 
+            no logging or directory mutation.
+
+    WandB Lineage Tracking:
+        The logger maintains a 'wandb_id.txt' file in 'fpath'. This acts as a 'hit-list'
+        for overwrites and a 'breadcrumb' for resumes. Resumed runs are renamed on the
+        server to "ParentName_resume_from_step_X" to maintain clear experiment history.
+    """
 
     def __init__(
         self,
         fpath: str,
         overwrite: bool = False,
         resume: bool = False,
+        eval_mode: bool = False,
         use_wandb: bool = False,
     ):
         self.fpath = Path(fpath)
         self._overwrite = overwrite
+        self._resume = resume
+        self._eval_mode = eval_mode
 
-        if self.fpath.exists() and not self._overwrite and not resume:
+        if self._overwrite and self.fpath.exists():
+            print(f"\n⚠️ WARNING: Overwrite is set to True for '{self.fpath}'.")
+            print("This will completely DESTROY existing local stats and delete the WandB lineage from the cloud.")
+            ans = input("Proceed? [y/N]: ")
+            if ans.strip().lower() != 'y':
+                print("Aborted by user.")
+                sys.exit(0)
+
+        if self.fpath.exists() and not self._overwrite and not self._resume and not self._eval_mode:
             ts = datetime.datetime.now().strftime('%Y_%m_%d__%H_%M_%S')
             self.fpath = self.fpath.with_name(f"{self.fpath.name}_{ts}")
         self.fpath.mkdir(parents=True, exist_ok=True)
-
 
         self._use_rollback = False
         self._rollback_monitor = None
@@ -122,38 +164,18 @@ class ModelLogger:
 
         self._stats = {}
         self._config = {}
+        self._stage_buffer = {}
         self._last_used_path, self._output_path = None, None
-        self._step = 0
+        self._step = 1
 
-        self._use_wandb = _HAS_WANDB and use_wandb
+        self._use_wandb = _HAS_WANDB and use_wandb and not self._eval_mode
+        self._old_wandb_id = None
+
         if self._use_wandb:
-            project = os.environ.get("WANDB_PROJECT")
-            name = os.environ.get("WANDB_RUN")
-            assert project is not None, "Set the WANDB_PROJECT env variable"
-
-            id_file = self.fpath / "wandb_id.txt"
-            self._wandb_defined_metrics = set()
-            if id_file.exists() and resume:
-                run_id = id_file.read_text().strip()
-                run_name = f"{self.fpath.name}_{run_id}" if name is None else name
-                self.logger.info(f"Resuming existing WandB Run ID: {run_id}")
-            else:
-                run_id = wandb.util.generate_id()
-                run_name = f"{self.fpath.name}_{run_id}" if name is None else name
-                id_file.write_text(run_id)
-                self.logger.info(f"Created new WandB Run ID: {run_id}")
-
-            wandb.init(
-                project=project,
-                name=run_name,   # Display Name
-                id=run_id,       # Internal Unique ID
-                dir=str(self.fpath),
-                resume="allow"
-            )
+            self._init_wandb()
 
     def checkpoint(
         self,
-        step: int,
         *,
         model: Optional[ModuleParams] = None,
         optimizer: Optional[torch.optim.Optimizer] = None,
@@ -162,8 +184,6 @@ class ModelLogger:
         **modules,
     ):
 
-        assert isinstance(step, int), f"'step' must be int, got {type(step).__name__}"
-        self._step = step
         is_mod = lambda o: isinstance(o, torch.nn.Module)
         is_mod_list = lambda o: isinstance(o, (list, tuple)) and all(isinstance(x, torch.nn.Module) for x in o)
         is_opt = lambda o: isinstance(o, torch.optim.Optimizer)
@@ -180,7 +200,7 @@ class ModelLogger:
         if ema is not None:
             assert is_mod(ema) or is_mod_list(ema), "`ema` must be a torch.nn.Module or list/tuple of torch.nn.Modules."
 
-        _path = self.fpath / f"checkpoint_{step}"
+        _path = self.fpath / f"checkpoint_{self._step}"
         output_path = _path / "outputs/"
         output_path.mkdir(parents=True, exist_ok=True)
 
@@ -192,18 +212,16 @@ class ModelLogger:
             **self._create_dict(ema, "ema"),
         )
         for k,v in modules.items():
-            cp.update(**self._create_dict(v, k))
+            cp.update(self._create_dict(v, k))
 
         if getattr(self, '_use_rollback', False) and self._rollback_monitor:
             cp['monitor_state'] = self._rollback_monitor.state()
 
         torch.save(cp, _path / "checkpoint.pt")
-        self.save_stats(self.fpath)
 
         self._last_used_path = _path
         self._output_path = str(output_path)
-        self._step = step
-        self.logger.info(f"Checkpoint saved: checkpoint_{step}")
+        self.logger.info(f"Checkpoint saved: checkpoint_{self._step}")
 
     def load_checkpoint(
         self,
@@ -230,8 +248,51 @@ class ModelLogger:
             **modules,
         )
 
-        loaded_step = checkpoint.get("step")
-        self._step = loaded_step if loaded_step is not None else 0
+        loaded_step = checkpoint.get("step", step)
+
+        if self._resume:
+            self._step = loaded_step + 1
+
+            if self._overwrite:
+                self.logger.info("Overwrite is True: Wiping previous stats history.")
+                self._stats = {'step': loaded_step}
+            else:
+                try:
+                    self._stats = self.load_stats()
+                except FileNotFoundError:
+                    self._stats = {}
+
+                truncated_stats = {}
+                for k, v in self._stats.items():
+                    if k == "step" or k.endswith("/step"): continue
+
+                    if '/' in k:
+                        group_step_key = f"{k.split('/')[0]}/step"
+                        if group_step_key not in self._stats: continue
+                        group_step = self._stats[group_step_key]
+
+                        if not group_step: continue
+                        if loaded_step < group_step[0]: continue
+
+                        valid_steps = [x for x in group_step if x <= loaded_step]
+                        if not len(valid_steps): continue
+
+                        closest_step = max(valid_steps)
+                        max_idx_to_keep = group_step.index(closest_step) + 1
+                        truncated_stats[k] = v[:max_idx_to_keep]
+                        truncated_stats[group_step_key] = group_step[:max_idx_to_keep]
+                    else:
+                        t_list = v[:loaded_step]
+                        while len(t_list) < loaded_step:
+                            t_list.append(None)
+                        truncated_stats[k] = t_list
+
+                self._stats = truncated_stats
+                self._stats['step'] = loaded_step
+
+        else:
+            self._step = loaded_step
+            self._stats = {}
 
         if getattr(self, '_use_rollback', False) and self._rollback_monitor:
             monitor_state = checkpoint.get('monitor_state')
@@ -239,10 +300,57 @@ class ModelLogger:
                 self._rollback_monitor.load_state_dict(monitor_state)
                 self.logger.info(f"Rollback Monitor state restored (Best Step: {self._rollback_monitor.best_step})")
 
+        if self._resume and not self._overwrite and getattr(self, '_use_wandb', False) and getattr(self, '_old_wandb_id', None):
+            base_name = getattr(self, '_old_wandb_name', f"{self.fpath.name}_{self._old_wandb_id}")
+            new_name = f"{base_name}_resume_from_step_{step}"
+
+            wandb.run.name = new_name
+            try:
+                api = wandb.Api()
+                project_name = wandb.run.project
+                server_run = api.run(f"{project_name}/{wandb.run.id}")
+                server_run.name = new_name
+                server_run.update()
+                self.logger.info(f"✨ WandB run renamed on server to: {new_name}")
+            except Exception as e:
+                self.logger.warning(f"Could not push name change to WandB server: {e}")
+
+        # --- WANDB STATS REPLAY (Only if safe resuming) ---
+        if self._resume and not self._overwrite and getattr(self, '_use_wandb', False) and self._stats:
+            self.logger.info("Replaying historical stats into the new WandB branch...")
+            replay_timeline = {}
+
+            for k, v in self._stats.items():
+                if k == "step" or k.endswith("/step"): 
+                    continue
+
+                if '/' in k:
+                    group_step_key = f"{k.split('/')[0]}/step"
+                    steps = self._stats.get(group_step_key, [])
+                    for i, val in enumerate(v):
+                        if val is None: continue
+                        if i < len(steps):
+                            s = steps[i]
+                            if s not in replay_timeline: replay_timeline[s] = {}
+                            replay_timeline[s][k] = val
+                else:
+                    for i, val in enumerate(v):
+                        if val is None: continue
+                        s = i + 1
+                        if s not in replay_timeline: replay_timeline[s] = {}
+                        replay_timeline[s][k] = val
+
+            sorted_steps = sorted(replay_timeline.keys())
+            for s in sorted_steps:
+                payload = replay_timeline[s]
+                payload["step"] = s
+                wandb.log(payload)
+            self.logger.info(f"✅ Replayed {len(sorted_steps)} steps of history into WandB.")
+
         if ckpt_folder.exists():
             self._last_used_path = ckpt_folder
             self._output_path = str(ckpt_folder / "outputs")
-            self.logger.info(f"State restored from step {self._step}. Output path set.")
+            self.logger.info(f"State restored from step {loaded_step}. Internal clock: {self._step}.")
         return checkpoint
 
     def enable_rollback(
@@ -269,27 +377,44 @@ class ModelLogger:
         _best_cp_path = self.fpath / f"checkpoint_{self._rollback_monitor.best_step}"
         return degraded, _best_cp_path, self._rollback_monitor.best_step
 
-    def add_stats(self, commit: bool = True, **stats):
-        _key_accurate_stats = self._flatten_dict(stats)
+    def commit(self, step: Optional[int] = None):
 
-        if commit:
-            if 'step' in _key_accurate_stats:
-                self._step = _key_accurate_stats['step']
-            else:
-                # Auto-tick the clock
-                self._step += 1
+        commit_step = step if step is not None else self._step
+        self._stats["step"] = commit_step
 
-        for k, v in _key_accurate_stats.items():
-            if self._use_wandb and k not in self._wandb_defined_metrics:
-                wandb.define_metric(name=k, step_metric="step")
-                self._wandb_defined_metrics.add(k)
-            self._stats.setdefault(k, []).append(v)
+        updated_groups = set()
+        for k, v in self._stage_buffer.items():
+            val = v.item() if hasattr(v, 'item') else v
+            self._stats.setdefault(k, []).append(val)
 
-        if "step" not in _key_accurate_stats:
-            _key_accurate_stats["step"] = self._step
+            # ungrouped metrics
+            if '/' in k:
+                group_prefix = k.split('/')[0]
+                group_step_key = f"{group_prefix}/step"
+
+                if group_step_key not in updated_groups:
+                    self._stats.setdefault(group_step_key, []).append(self._step)
+                    updated_groups.add(group_step_key)
 
         if self._use_wandb:
-            wandb.log(_key_accurate_stats, step=self._step)
+            payload = {**self._stage_buffer, "step": self._step}
+            wandb.log(payload, commit=True)
+
+        self.save_stats(self.fpath)
+        self._stage_buffer.clear()
+        if step is not None:
+            self._step = step + 1
+        else:
+            self._step += 1
+
+    def add_stats(self, **stats):
+        flat_stats = self._flatten_dict(stats)
+        self._stage_buffer.update(flat_stats)
+        if self._use_wandb:
+            for k in flat_stats.keys():
+                if k not in self._wandb_defined_metrics:
+                    wandb.define_metric(k, step_metric="step")
+                    self._wandb_defined_metrics.add(k)
 
     def add_config(self, **config):
         clean_config = self._sanitize_config(config)
@@ -367,8 +492,8 @@ class ModelLogger:
     def add_video(
         self,
         name: str,
-        video: Union[str, np.array],
-    ):
+        video: Union[str, Path, np.ndarray],
+    ) -> None:
 
         current_step = self._step
         if self._output_path:
@@ -378,26 +503,41 @@ class ModelLogger:
             save_dir.mkdir(parents=True, exist_ok=True)
 
         fmt = "mp4"
-        if isinstance(video, str):
-            video = Path(video)
-            if not src.exists():
-                self.logger.error(f"Video file {src} not found.")
+        if isinstance(video, (str, Path)):
+            source_path = Path(video)
+            if not source_path.exists():
+                self.logger.error(f"Video file {source_path} not found.")
                 return
 
-            extension = video.suffix # e.g. .mp4 or .gif
-            filename = f"{name}_{current_step}{extension}"
+            extension = source_path.suffix
             fmt = extension.lstrip(".")
+            target_filename = f"{name}_{current_step}{extension}"
+            target_path = save_dir / target_filename
+
+            if source_path.absolute() != target_path.absolute():
+                shutil.copy(source_path, target_path)
+
+            local_video_path = target_path
+
         else:
             if not _HAS_IMAGEIO:
-                self.logger.warning(f"ImageIO lib does not exist; Video will not be created.")
+                self.logger.warning("ImageIO lib does not exist; Video will not be created.")
                 return
-            else:
-                imageio.mimwrite(save_dir / name, video, fps=30, quality=8)
-                video = save_dir / name
+
+            target_filename = f"{name}_{current_step}.mp4"
+            target_path = save_dir / target_filename
+
+            imageio.mimwrite(target_path, video, fps=30, quality=8)
+            local_video_path = target_path
 
         if self._use_wandb:
-            w_vid = wandb.Video(video, caption=f"{name} (Step {current_step})", fps=30, format=fmt)
-            wandb.log({f"videos/{name}": w_vid}, step=current_step)
+            w_vid = wandb.Video(
+                str(local_video_path),
+                caption=f"{name} (Step {current_step})",
+                fps=30,
+                format=fmt
+            )
+            wandb.log({f"videos/{name}": w_vid}, step=self._step)
 
     def set_step(self, step: int):
         self._step = step
@@ -414,7 +554,7 @@ class ModelLogger:
             wandb.config.update(self._config, allow_val_change=True)
 
     def save_stats(self, fpath: Optional[str] = None) -> None:
-        with open(f'{fpath if fpath else self._last_path}/stats.yaml', 'w', encoding='utf-8') as f:
+        with open(f'{fpath if fpath else self._last_used_path}/stats.yaml', 'w', encoding='utf-8') as f:
             yaml.dump(self._stats, f, sort_keys=False, allow_unicode=True, Dumper=_LiteralDumper)
 
     def load_stats(self) -> dict:
@@ -454,15 +594,67 @@ class ModelLogger:
 
         fmt = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
-        # file_handler = logging.FileHandler(self.fpath / "system.log")
-        # file_handler.setFormatter(fmt)
-        # logger.addHandler(file_handler)
-
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(fmt)
         logger.addHandler(stream_handler)
 
         return logger
+
+    def _init_wandb(self):
+        project = os.environ.get("WANDB_PROJECT")
+        name = os.environ.get("WANDB_RUN")
+        assert project is not None, "Set the WANDB_PROJECT env variable"
+
+        id_file = self.fpath / "wandb_id.txt"
+        self._wandb_defined_metrics = set()
+
+        lineage_ids = []
+        if id_file.exists():
+            lineage_ids = [line.strip() for line in id_file.read_text().strip().split('\n') if line.strip()]
+
+        # 1. OVERWRITE: ALWAYS delete all runs in the lineage (even if resuming weights)
+        if self._overwrite and lineage_ids:
+            self.logger.info(f"🗑️ Overwrite=True: Deleting {len(lineage_ids)} old WandB run(s) from server...")
+            try:
+                api = wandb.Api()
+                for old_id in lineage_ids:
+                    try:
+                        run = api.run(f"{project}/{old_id}") 
+                        run.delete()
+                        self.logger.info(f"   -> Deleted run {old_id}")
+                    except Exception as e:
+                        self.logger.warning(f"   -> Could not delete {old_id}: {e}")
+            except Exception as e:
+                self.logger.warning(f"WandB API Error during deletion: {e}")
+            lineage_ids = [] # Clear lineage locally
+
+        # 2. RESUME (Only if NOT overwriting): Setup branching
+        if self._resume and not self._overwrite and lineage_ids:
+            self._old_wandb_id = lineage_ids[-1] 
+            try:
+                api = wandb.Api()
+                old_run = api.run(f"{project}/{self._old_wandb_id}")
+                self._old_wandb_name = old_run.name
+            except Exception:
+                self._old_wandb_name = name if name else f"{self.fpath.name}_{self._old_wandb_id}"
+
+        # 3. GENERATE & SAVE: Create the new run ID
+        run_id = wandb.util.generate_id()
+        run_name = f"{self.fpath.name}_{run_id}" if name is None else name
+
+        mode = "a" if (self._resume and not self._overwrite) else "w"
+        prefix = "\n" if (self._resume and not self._overwrite and lineage_ids) else ""
+        with open(id_file, mode) as f:
+            f.write(f"{prefix}{run_id}")
+
+        self.logger.info(f"Staged NEW WandB Run ID: {run_id}")
+
+        wandb.init(
+            project=project,
+            name=run_name,
+            id=run_id,
+            dir=str(self.fpath),
+        )
 
     @staticmethod
     def _flatten_dict(d: Dict, parent_key: str = '', sep: str = '/') -> Dict:
