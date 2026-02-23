@@ -534,7 +534,6 @@ class ModelLogger:
             w_vid = wandb.Video(
                 str(local_video_path),
                 caption=f"{name} (Step {current_step})",
-                fps=30,
                 format=fmt
             )
             wandb.log({f"videos/{name}": w_vid}, step=self._step)
