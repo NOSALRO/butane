@@ -33,7 +33,7 @@ class FlowMatching(torch.nn.Module):
             time = (1 / (1 + sigma)).clamp(0.0001, 1.0)
             return time
         else:
-            return torch.rand(n, 1).to(self._dummy_param.device)
+            return torch.rand(n, 1, device=self._dummy_param.device)
 
     def forward(
         self,
