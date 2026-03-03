@@ -10,6 +10,7 @@ class ConvBlockBase(torch.nn.Module):
 
     @property
     def output_size(self) -> torch.Tensor:
+        training_state = self.training
         self.eval()
         sz = None
         with torch.no_grad():
@@ -25,7 +26,7 @@ class ConvBlockBase(torch.nn.Module):
                 elif isinstance(module, torch.nn.Sequential):
                     _input = module(_input)
             sz = torch.tensor(_input.size()[1:])
-        self.train()
+        self.train(training_state)
         return sz
 
     @staticmethod

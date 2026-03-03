@@ -76,23 +76,26 @@ class ConvBlock(ConvBlockBase):
 
         self.conv_block = torch.nn.ModuleList()
         for i in range(len(_channels) - 1):
+            is_last = (i == len(channels) - 1)
+            current_af = activation_function[i] if (not is_last or output_activation) else None
+
             self.conv_block.extend(
                 self.__create_subblock(
-                    _channels[i],
-                    _channels[i + 1],
-                    conv_kernels[i],
-                    conv_stride[i],
-                    conv_pad[i],
-                    conv_bias[i],
-                    conv_pad_mode[i],
-                    self.pool[i],
-                    pool_kernels[i],
-                    pool_stride[i],
-                    pool_pad[i],
-                    dropout[i],
-                    activation_function[i] if (i + 1) != (len(_channels) - 1) or output_activation else None, # if the model is single Conv1dBlock check if we want activation function on the output
-                    normalization[i], #if (i + 1) != (len(channels) - 1) else False, #
-                    self.norm_type[i]
+                  in_channels=_channels[i],
+                  out_channels=_channels[i + 1],
+                  conv_kernel=conv_kernels[i],
+                  conv_stride=conv_stride[i],
+                  conv_pad=conv_pad[i],
+                  conv_bias=conv_bias[i],
+                  conv_pad_mode=conv_pad_mode[i],
+                  pool=self.pool[i],
+                  pool_kernel=pool_kernels[i],
+                  pool_stride=pool_stride[i],
+                  pool_pad=pool_pad[i],
+                  dropout=dropout[i],
+                  af=current_af,
+                  norm=normalization[i],
+                  norm_type=self.norm_type[i]
             ))
 
     def module_list(self):
