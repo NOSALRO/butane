@@ -61,7 +61,6 @@ class CheckpointManager:
              self.logger.error(f"Checkpoint not found at: {ckpt_folder}")
              raise FileNotFoundError(f"Checkpoint {step} not found.")
 
-        # Assuming `nn.utils.load_state` is imported at the top of your file
         checkpoint = nn.utils.load_state(
             str(ckpt_folder),
             model=model,
