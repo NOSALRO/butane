@@ -20,3 +20,4 @@ from butane.data import (
 
 from butane.math.ops import *
 from butane import _utils as utils
+from butane import _typedefs as types
