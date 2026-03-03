@@ -397,7 +397,7 @@ class UNetNd(torch.nn.Module):
         self._n_residual_blocks = n_residual_blocks
         self._n_middle_blocks = n_middle_blocks
 
-        self._has_condition = condition_projection or condition_concat or (n_classes is not None) or condition_cross_attention or condition_add
+        self._has_condition = condition_projection or condition_concat or (n_classes is not None) or condition_cross_attention or condition_add or condition_concat_projection
         self._n_classes = n_classes
         self._class_drop_prob = class_drop_prob
         self._condition_input_dims = condition_input_dims if condition_input_dims is not None else copy.copy(self._input_dims)
@@ -405,6 +405,7 @@ class UNetNd(torch.nn.Module):
         self._condition_cross_attention = condition_cross_attention
         self._condition_concat = condition_concat
         self._condition_add = condition_add
+        self._custom_projector = condition_projection_module is not None
         self._condition_concat_projection = condition_concat_projection
         self._pretrained_condition_module = pretrained_condition_module
         self._is_flat_condition = isinstance(self._condition_input_dims, (list, tuple)) and len(self._condition_input_dims) == 1
@@ -566,7 +567,7 @@ class UNetNd(torch.nn.Module):
         )
 
         self._condition_output_dims = None
-        if self._condition_projection or self._condition_cross_attention:
+        if self._condition_projection or self._condition_cross_attention or condition_projection_module is not None:
             if condition_projection_module is None:
                 if self._is_flat_condition:
                     _out_dim = self._embedding_size * 2 if (self._use_film and not self._condition_concat) else self._embedding_size
@@ -596,7 +597,7 @@ class UNetNd(torch.nn.Module):
             else:
                 self.condition_projection_block = XDependentSequential(condition_projection_module)
                 _condition_module_output_dims = utils.calculate_output_size(self.condition_projection_block, input_dims=self._condition_input_dims)
-                if not self._condition_cross_attention:
+                if self._condition_projection and not self._condition_cross_attention:
                     _projector = MLPBlock(
                         input_dims=_condition_module_output_dims.prod().int(),
                         output_dims=self._embedding_size * 2 if self._use_film else self._embedding_size,
@@ -641,7 +642,7 @@ class UNetNd(torch.nn.Module):
         self._resampled = []
 
         if self._condition_concat_projection:
-            self._embedding_size *= 2
+            self._embedding_size += self._condition_output_dims.item()
 
         self.downsample_blocks = torch.nn.ModuleList([])
         for i, ch in enumerate(self._channels):
@@ -742,7 +743,7 @@ class UNetNd(torch.nn.Module):
                     _upsample_input_dims = utils.calculate_output_size(_subblock[-1], input_dims=_upsample_input_dims)
                 self.upsample_blocks.append(XDependentSequential(*_subblock))
 
-        if self._condition_concat:
+        if self._condition_concat and not self._is_flat_condition:
             self.condition_residual_block = self.residual_block_creator(
                 input_dims=[_upsample_input_dims[0] * 2, *_upsample_input_dims[1:]],
                 embedding_size=self._embedding_size,
@@ -876,7 +877,7 @@ class UNetNd(torch.nn.Module):
                         if isinstance(vi, torch.Tensor) and compatible(vi, x):
                             x = torch.cat([x, vi], dim=1) if self._condition_concat else x + vi
 
-        if (self._condition_projection or self._condition_cross_attention) and not getattr(self, "_is_flat_condition", False):
+        if hasattr(self, 'condition_projection_block') and not getattr(self, "_is_flat_condition", False):
             if z is not None:
                 c_emb = z
             elif z is None:
@@ -956,7 +957,7 @@ class UNetNd(torch.nn.Module):
             h = torch.cat([h, _skip], dim=1)
             h = up(h, emb, c_emb)
 
-        if self._condition_concat:
+        if self._condition_concat and hasattr(self, "condition_residual_block"):
             h = torch.cat((h, _residual), dim=1)
             h = self.condition_residual_block(h, emb)
 
@@ -989,6 +990,8 @@ class UNetNd(torch.nn.Module):
 
         if self._condition_projection: modes.append("Projection Block")
         if self._condition_cross_attention: modes.append("Cross Attention")
+        if self._custom_projector: modes.append("Custom Projection Module")
+        if self._condition_concat_projection: modes.append("Concat to Global Emb")
         if self._n_classes is not None: modes.append(f"Class Embedding (n={self._n_classes})")
 
         cond_mode = " + ".join(modes) if modes else "None (Unconditional)"
