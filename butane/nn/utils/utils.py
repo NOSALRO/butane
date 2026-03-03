@@ -89,14 +89,15 @@ def calculate_output_size(
     return torch.tensor(_input.size())[1:]
 
 @torch.no_grad()
-def init_weights(model: torch.nn.Module, weight_init_method: Callable, bias_init_method: Optional[Callable] = None):
+def init_weights(model: torch.nn.Module, weight_init_method: Optional[Callable] =  None, bias_init_method: Optional[Callable] = None):
     for module in model.modules():
         if hasattr(module, 'weight'):
             if 'norm' in module._get_name().lower():
                 continue
             if isinstance(module, torch.nn.Embedding):
                 continue
-            weight_init_method(module.weight.data)
+            if weight_init_method is not None:
+                weight_init_method(module.weight.data)
             if hasattr(module, 'bias') and module.bias is not None and bias_init_method is not None:
                 bias_init_method(module.bias.data)
 
