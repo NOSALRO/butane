@@ -57,16 +57,17 @@ class ModelLogger:
 
         # Initialize orthogonal managers
         self.env = ExperimentEnvironment(fpath, overwrite, resume, eval_mode, self.logger)
-        self.history = HistoryManager(self.env.fpath, self.logger)
-        self.artifacts = ArtifactManager(self.env.fpath, self.logger)
+        self.history = HistoryManager(self.env.work_dir, self.env.eval_mode, self.logger)
+        self.artifacts = ArtifactManager(self.env.work_dir, self.logger)
         self.checkpointer = CheckpointManager(self.env.fpath, self.logger)
 
         self.telemetry = None
-        try:
-            import wandb
-            from .telemetry import WandbManager
-            self.telemetry = WandbManager(self.env.fpath, overwrite, resume, self.logger)
-        except ImportError: self.logger.warning("WandB requested but not installed.")
+        if not self.env.eval_mode and use_wandb:
+            try:
+                import wandb
+                from .telemetry import WandbManager
+                self.telemetry = WandbManager(self.env.fpath, overwrite, resume, self.logger)
+            except ImportError: self.logger.warning("WandB requested but not installed.")
 
         # Internal control state
         self._step = 1
@@ -86,19 +87,21 @@ class ModelLogger:
         if self.telemetry: self.telemetry.define_metrics(flat_stats)
 
     def checkpoint(self, **kwargs) -> None:
+        if self.env.eval_mode:
+            return
         monitor_state = self._rollback_monitor.state() if self._use_rollback else None
         _path, out_path = self.checkpointer.save(step=self._step, monitor_state=monitor_state, **kwargs)
-        self.env.update_paths(_path, out_path)
 
     def load_checkpoint(self, step: int, **kwargs) -> dict:
         checkpoint, _path, out_path = self.checkpointer.load(step, **kwargs)
         loaded_step = checkpoint.get("step", step)
 
         if self.env.resume:
-            self._step = loaded_step + 1 # Align clock to next forward pass
-            self.history.recover_state(loaded_step, self.env.overwrite)
+            self._step = loaded_step + 1
+            history = self.history.recover_state(loaded_step, self.env.overwrite)
             if self.telemetry and not self.env.overwrite:
-                self.telemetry.replay_history(loaded_step, self.history.stats)
+                self.telemetry.append_resume_step(loaded_step)
+                self.telemetry.replay_history(history)
         else:
             self._step = loaded_step
             self.history.reset()
@@ -106,8 +109,9 @@ class ModelLogger:
         if self._use_rollback and checkpoint.get('monitor_state'):
             self._rollback_monitor.load_state(checkpoint['monitor_state'])
 
-        self.env.update_paths(_path, out_path)
-        self.logger.info(f"State restored from step {loaded_step}. Internal clock set to: {self._step}.")
+        if not self.env.eval_mode: 
+            self.env.update_paths(_path, out_path)
+            self.logger.info(f"State restored from step {loaded_step}")
         return checkpoint
 
     def enable_rollback(self, increase_keys: List[str] = None, decrease_keys: List[str] = None, tolerance: float = 0.1):
@@ -122,8 +126,9 @@ class ModelLogger:
         return degraded, best_path, self._rollback_monitor.best_step
 
     def add_config(self, **config):
-        self.artifacts.save_config(config)
-        if self.telemetry: self.telemetry.update_config(config)
+        if not self.env.eval_mode:
+            self.artifacts.save_config(config)
+            if self.telemetry: self.telemetry.update_config(config)
 
     def add_plot(self, name: str, plot: Any, **kwargs):
         path = self.artifacts.save_media(name, plot, self.env.output_path, **kwargs)

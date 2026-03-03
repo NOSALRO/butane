@@ -27,12 +27,7 @@ class WandbManager:
             lineage_ids = []
 
         if resume and not overwrite and lineage_ids:
-            old_id = lineage_ids[-1]
-            try:
-                old_name = self.wandb.Api().run(f"{project}/{old_id}").name
-            except Exception:
-                old_name = name if name else f"{self.fpath.name}_{old_id}"
-            run_name = f"{old_name}_resume" 
+            run_name = lineage_ids[-1]
         else:
             run_id = self.wandb.util.generate_id()
             run_name = f"{self.fpath.name}_{run_id}" if name is None else name
@@ -69,25 +64,27 @@ class WandbManager:
     def update_config(self, config: dict):
         self.wandb.config.update(config, allow_val_change=True)
 
-    def replay_history(self, current_step: int, history_columns: dict):
-        self.logger.info("Replaying historical stats into the new WandB branch...")
+    def replay_history(self, history_rows: List[dict]):
+        for i, row in enumerate(history_rows):
+            step = row.get("step", i + 1)
+            self.wandb.log(row, step=step)
+        self.logger.info(f"✅ Replayed {len(history_rows)} steps of history into WandB.")
 
-        # Invert column-based stats into row-based payloads for replay
-        replay_timeline = {}
-        for k, v_list in history_columns.items():
-            if k == "step" or k.endswith("/step"): continue
-            for i, val in enumerate(v_list):
-                if val is None: continue
-                s = history_columns.get('step', [])[i] if 'step' in history_columns else i + 1
-                if s <= current_step:
-                    replay_timeline.setdefault(s, {})[k] = val
+    def append_resume_step(self, step: int):
+        if getattr(self.wandb, "run", None) is None:
+            return
 
-        sorted_steps = sorted(replay_timeline.keys())
-        for i, s in enumerate(sorted_steps):
-            self.wandb.log(replay_timeline[s], step=s)
-            if i > 0 and i % 5000 == 0: time.sleep(0.5) # Prevent CommError
+        current_name = self.wandb.run.name
+        new_name = f"{current_name}_resume_from_step_{step}"
+        self.wandb.run.name = new_name
 
-        self.logger.info(f"✅ Replayed {len(sorted_steps)} steps of history into WandB.")
+        try:
+            api = self.wandb.Api()
+            server_run = api.run(f"{self.wandb.run.project}/{self.wandb.run.id}")
+            server_run.name = new_name
+            server_run.update()
+        except Exception as e:
+            self.logger.warning(f"Could not push name change to WandB server: {e}")
 
     # Artifact specific logs
     def log_plot(self, name: str, plot: Any, step: int): self.wandb.log({f"plot/{name}": plot}, step=step)

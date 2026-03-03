@@ -14,19 +14,19 @@ def _multiline_str_presenter(dumper: yaml.SafeDumper, data: str):
 _LiteralDumper.add_representer(str, _multiline_str_presenter)
 
 class ArtifactManager:
-    def __init__(self, fpath: Path, logger: logging.Logger):
-        self.fpath = fpath
+    def __init__(self, work_dir: Path, logger: logging.Logger):
+        self.work_dir = work_dir
         self.logger = logger
         self._config = {}
 
     def save_config(self, config: dict) -> None:
         clean_config = self._sanitize_config(config)
         self._config.update(clean_config)
-        with open(self.fpath / 'config.yaml', 'w', encoding='utf-8') as f:
+        with open(self.work_dir / 'config.yaml', 'w', encoding='utf-8') as f:
             yaml.dump(self._config, f, sort_keys=False, allow_unicode=True, Dumper=_LiteralDumper)
 
     def save_csv(self, name: str, data: Dict[str, List], analysis_dir: Optional[Path]) -> Optional[Path]:
-        target_dir = analysis_dir if analysis_dir else (self.fpath / "analysis")
+        target_dir = analysis_dir if analysis_dir else (self.work_dir / "analysis")
         target_dir.mkdir(parents=True, exist_ok=True)
         csv_path = target_dir / f"{name}_analysis.csv"
 
@@ -41,7 +41,7 @@ class ArtifactManager:
 
     def save_media(self, name: str, obj: Any, out_dir: Optional[Path], **kwargs) -> Optional[Path]:
         """ Mainly for plots and images thourgh matplotlib or seaborn """
-        target_dir = out_dir if out_dir else (self.fpath / "outputs")
+        target_dir = out_dir if out_dir else (self.work_dir / "outputs")
         target_dir.mkdir(parents=True, exist_ok=True)
         file_path = target_dir / name
 
@@ -53,7 +53,7 @@ class ArtifactManager:
         return file_path
 
     def save_video(self, name: str, video: Union[str, Path, np.ndarray], out_dir: Optional[Path], **imageio_kwargs) -> Optional[Path]:
-        target_dir = out_dir if out_dir else (self.fpath / "outputs")
+        target_dir = out_dir if out_dir else (self.work_dir / "outputs")
         target_dir.mkdir(parents=True, exist_ok=True)
 
         target_path = target_dir / name
@@ -70,7 +70,7 @@ class ArtifactManager:
         else:
             import imageio
             if 'fps' not in imageio_kwargs: imageio_kwargs["fps"] = 30
-            if 'quaility' not in imageio_kwargs: imageio_kwargs["quaility"] = 8
+            if 'quality' not in imageio_kwargs: imageio_kwargs["quality"] = 8
             imageio.mimwrite(target_path, video, **imageio_kwargs)
 
         return target_path

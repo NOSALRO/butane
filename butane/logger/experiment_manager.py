@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import datetime
@@ -8,10 +9,12 @@ class ExperimentEnvironment:
     """ Helper class that manages the local experiment directories and paths """
     def __init__(self, fpath: str, overwrite: bool, resume: bool, eval_mode: bool, logger: logging.Logger):
         self.fpath = Path(fpath)
-        self.overwrite = overwrite
-        self.resume = resume
+        self.overwrite = overwrite and not eval_mode
+        self.resume = resume and not eval_mode
         self.eval_mode = eval_mode
         self.logger = logger
+
+        self.work_dir = self.fpath / "evaluation" if self.eval_mode else self.fpath
 
         self.last_path: Optional[Path] = None
         self.output_path: Optional[Path] = None
@@ -20,7 +23,7 @@ class ExperimentEnvironment:
 
     def _setup_directory(self) -> None:
 
-        if self.overwrite and self.fpath.exists():
+        if self.overwrite and self.fpath.exists() and not (self.resume or self.eval_mode):
             print(f"\n⚠️ WARNING: Overwrite is set to True for '{self.fpath}'.")
             print("This will completely DESTROY existing local stats and delete the WandB lineage from the cloud.")
             ans = input("Proceed? [y/N]: ")
@@ -36,20 +39,22 @@ class ExperimentEnvironment:
                 self.fpath.rename(archived_path)
                 self.logger.info(f"Archived previous run to: {archived_path}")
         self.fpath.mkdir(parents=True, exist_ok=True)
+        self.work_dir.mkdir(parents=True, exist_ok=True)
 
     def update_paths(self, checkpoint_path: Path, output_path: Path) -> None:
-        self.last_path = checkpoint_path
-        self.output_path = output_path
-
+        self.last_path = Path(checkpoint_path) if isinstance(checkpoint_path, str) else checkpoint_path
+        self.output_path = Path(output_path) if isinstance(output_path, str) else output_path
 
 class HistoryManager:
 
-    def __init__(self, fpath: Path, logger: logging.Logger):
-        self.fpath = fpath
+    def __init__(self, work_dir: Path, eval_mode: bool, logger: logging.Logger):
+        self.work_dir = work_dir
         self.logger = logger
-        self.stats_file = self.fpath / "stats.jsonl"
+
+        filename = "eval_stats.jsonl" if eval_mode else "stats.jsonl"
+        self.stats_file = self.work_dir / filename
+
         self._stage_buffer: Dict[str, Any] = {}
-        self.stats: Dict[str, List] = {} # Populated only during recovery for WandB replay
 
     def stage_metrics(self, stats: dict) -> Dict[str, Any]:
         flat_stats = self._flatten_dict(stats)
@@ -72,13 +77,9 @@ class HistoryManager:
             self.logger.info("Overwrite is True: Wiping previous stats history.")
             if self.stats_file.exists():
                 self.stats_file.unlink()
-            self.stats = {}
-            return
+            return []
 
-        # Load available history into RAM for WandB replay later
-        self.stats = self._load_jsonl_to_columns()
-
-        # Truncate orphaned rows on disk
+        valid_rows = []
         if self.stats_file.exists():
             valid_lines = []
             with open(self.stats_file, 'r', encoding='utf-8') as f:
@@ -87,6 +88,7 @@ class HistoryManager:
                     row = json.loads(line)
                     if row.get("step", 0) <= safe_step:
                         valid_lines.append(line)
+                        valid_rows.append(row) # CAPTURE THE ROW HERE
 
             temp_file = self.stats_file.with_suffix('.jsonl.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:
@@ -94,20 +96,7 @@ class HistoryManager:
             temp_file.replace(self.stats_file)
 
         self.logger.info(f"History safely truncated to step {safe_step} on disk.")
-
-    def reset(self):
-        self.stats = {}
-
-    def _load_jsonl_to_columns(self) -> dict:
-        if not self.stats_file.exists(): return {}
-        columns = {}
-        with open(self.stats_file, "r", encoding="utf-8") as f:
-            for line in f:
-                if not line.strip(): continue
-                row = json.loads(line)
-                for k, v in row.items():
-                    columns.setdefault(k, []).append(v)
-        return columns
+        return valid_rows
 
     @staticmethod
     def _flatten_dict(d: Dict, parent_key: str = '', sep: str = '/') -> Dict:
