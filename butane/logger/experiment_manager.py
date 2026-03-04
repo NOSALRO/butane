@@ -38,6 +38,7 @@ class ExperimentEnvironment:
                 archived_path = self.fpath.with_name(f"{self.fpath.name}_{ts}")
                 self.fpath.rename(archived_path)
                 self.logger.info(f"Archived previous run to: {archived_path}")
+
         self.fpath.mkdir(parents=True, exist_ok=True)
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +48,7 @@ class ExperimentEnvironment:
 
 class HistoryManager:
 
-    def __init__(self, work_dir: Path, eval_mode: bool, logger: logging.Logger):
+    def __init__(self, work_dir: Path, overwrite: bool, eval_mode: bool, logger: logging.Logger):
         self.work_dir = work_dir
         self.logger = logger
 
@@ -55,6 +56,9 @@ class HistoryManager:
         self.stats_file = self.work_dir / filename
 
         self._stage_buffer: Dict[str, Any] = {}
+
+        if overwrite and self.stats_file.exists():
+            self.stats_file.unlink()
 
     def stage_metrics(self, stats: dict) -> Dict[str, Any]:
         flat_stats = self._flatten_dict(stats)
@@ -74,9 +78,6 @@ class HistoryManager:
 
     def recover_state(self, safe_step: int, overwrite: bool) -> None:
         if overwrite:
-            self.logger.info("Overwrite is True: Wiping previous stats history.")
-            if self.stats_file.exists():
-                self.stats_file.unlink()
             return []
 
         valid_rows = []
@@ -88,7 +89,7 @@ class HistoryManager:
                     row = json.loads(line)
                     if row.get("step", 0) <= safe_step:
                         valid_lines.append(line)
-                        valid_rows.append(row) # CAPTURE THE ROW HERE
+                        valid_rows.append(row)
 
             temp_file = self.stats_file.with_suffix('.jsonl.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:

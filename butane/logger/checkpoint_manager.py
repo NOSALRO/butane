@@ -1,6 +1,8 @@
+import json
+import shutil
 import torch
 from pathlib import Path
-from typing import Optional, Dict, Tuple, Any
+from typing import Optional, Dict, Tuple, Any, Union
 
 from .._typedefs import ModuleParams
 from .. import nn
@@ -15,27 +17,23 @@ class CheckpointManager:
         self,
         step: int,
         monitor_state: Optional[dict] = None,
-        model: Optional[Any] = None,
-        optimizer: Optional[Any] = None,
-        lr_scheduler: Optional[Any] = None,
-        ema: Optional[Any] = None,
+        is_best: bool = False,
         **modules,
     ) -> Tuple[Path, Path]:
-        self._validate_types(model, optimizer, lr_scheduler, ema)
+        self._validate_types(
+            model=modules.get("model"),
+            optimizer=modules.get("optimizer"),
+            lr_scheduler=modules.get("lr_scheduler"),
+            ema=modules.get("ema"),
+        )
 
         _path = self.fpath / f"checkpoint_{step}"
         output_path = _path / "outputs"
         output_path.mkdir(parents=True, exist_ok=True)
 
-        cp = dict(
-            step=step,
-            **self._create_dict(model, "model"),
-            **self._create_dict(optimizer, "optimizer"),
-            **self._create_dict(lr_scheduler, "lr_scheduler"),
-            **self._create_dict(ema, "ema"),
-        )
+        cp = dict(step=step)
         for k, v in modules.items():
-            cp.update(self._create_dict(v, k))
+            if v is not None: cp.update(self._create_dict(v, k))
 
         if monitor_state:
             cp['monitor_state'] = monitor_state
@@ -43,32 +41,51 @@ class CheckpointManager:
         torch.save(cp, _path / "checkpoint.pt")
         self.logger.info(f"Checkpoint saved: checkpoint_{step}")
 
+        if is_best:
+            best_dir = self.fpath / "best_model"
+            best_dir.mkdir(parents=True, exist_ok=True)
+
+            best_path = best_dir / "checkpoint.pt"
+            shutil.copyfile(_path / "checkpoint.pt", best_path)
+
+            if monitor_state and 'best_metrics' in monitor_state:
+                ledger_path = best_dir / "best_metrics.jsonl"
+                with open(ledger_path, "a", encoding="utf-8") as f:
+                    entry = {"step": step, **monitor_state['best_metrics']}
+                    f.write(json.dumps(entry) + "\n")
+
+            self.logger.info("🏆 Best checkpoint securely routed to: checkpoint_best.pt")
+
         return _path, output_path
 
     def load(
         self,
-        step: int,
-        model: Any,
-        optimizer: Optional[Any] = None,
-        lr_scheduler: Optional[Any] = None,
-        ema: Optional[Any] = None,
+        step: Union[int, str],
         **modules,
     ) -> Tuple[dict, Path, Path]:
-        """Loads weights from disk and returns (checkpoint_dict, checkpoint_path, output_path)."""
-        ckpt_folder = self.fpath.absolute() / f"checkpoint_{step}"
 
-        if not ckpt_folder.exists():
-             self.logger.error(f"Checkpoint not found at: {ckpt_folder}")
-             raise FileNotFoundError(f"Checkpoint {step} not found.")
+        if str(step).lower() == "best":
+            ckpt_folder = self.fpath.absolute() / f"best_model/"
+            if not ckpt_folder.exists():
+                self.logger.error(f"No best checkpoint found at {ckpt_folder}")
+                raise FileNotFoundError(f"Best checkpoint missing.")
+            self.logger.info("Loading the absolute best model weights...")
+        else:
+            potential_path = Path(step)
+            if potential_path.exists() and potential_path.is_dir():
+                ckpt_folder = potential_path
 
-        checkpoint = nn.utils.load_state(
-            str(ckpt_folder),
-            model=model,
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
-            ema=ema,
-            **modules,
-        )
+                # Update the root fpath to the parent of this explicit checkpoint
+                self.fpath = ckpt_folder.parent
+                try:
+                    parsed_step = ckpt_folder.name.split('_')[-1]
+                    self.logger.info(f"Loaded explicit path. Inferred step {parsed_step}. Root updated to {self.fpath}")
+                except Exception:
+                    self.logger.warning(f"Could not parse step from folder name: {ckpt_folder.name}")
+            else:
+                ckpt_folder = self.fpath.absolute() / f"checkpoint_{step}"
+
+        checkpoint = nn.utils.load_state(str(ckpt_folder), **modules)
 
         output_path = ckpt_folder / "outputs"
         return checkpoint, ckpt_folder, output_path

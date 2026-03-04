@@ -1,17 +1,7 @@
-import os
 import sys
-import csv
-import yaml
-import json
-import time
-import torch
-import numbers
-import shutil
 import logging
-import datetime
-import numpy as np
 from pathlib import Path
-from typing import Optional, List, Dict, Union, Any
+from typing import Optional, List, Dict, Any, Union
 
 from .checkpoint_manager import CheckpointManager
 from .experiment_manager import ExperimentEnvironment, HistoryManager
@@ -57,7 +47,7 @@ class ModelLogger:
 
         # Initialize orthogonal managers
         self.env = ExperimentEnvironment(fpath, overwrite, resume, eval_mode, self.logger)
-        self.history = HistoryManager(self.env.work_dir, self.env.eval_mode, self.logger)
+        self.history = HistoryManager(self.env.work_dir, self.env.overwrite, self.env.eval_mode, self.logger)
         self.artifacts = ArtifactManager(self.env.work_dir, self.logger)
         self.checkpointer = CheckpointManager(self.env.fpath, self.logger)
 
@@ -71,28 +61,45 @@ class ModelLogger:
 
         # Internal control state
         self._step = 1
-        self._rollback_monitor = None
+        self._monitor = None
         self._use_rollback = False
         self.logger.info(f"Initialized Experiment at: {self.env.fpath}")
 
     def step(self, step: Optional[int] = None) -> None:
-        self._step = step if step is not None else self._step + 1
+        if len(self.history._stage_buffer):
+            entry = self.history.flush_buffer_to_jsonl(self._step)
+            if self.telemetry: self.telemetry.log_metrics(entry, self._step)
 
-    def commit(self) -> None:
-        entry = self.history.flush_buffer_to_jsonl(self._step)
-        if self.telemetry: self.telemetry.log_metrics(entry, self._step)
+        self._step = step if step is not None else self._step + 1
 
     def add_stats(self, **stats) -> None:
         flat_stats = self.history.stage_metrics(stats)
         if self.telemetry: self.telemetry.define_metrics(flat_stats)
+        if self.env.eval_mode: self.history.flush_buffer_to_jsonl(self._step)
 
-    def checkpoint(self, **kwargs) -> None:
+    def checkpoint(self, metrics: dict = None, **kwargs) -> None:
         if self.env.eval_mode:
             return
-        monitor_state = self._rollback_monitor.state() if self._use_rollback else None
-        _path, out_path = self.checkpointer.save(step=self._step, monitor_state=monitor_state, **kwargs)
 
-    def load_checkpoint(self, step: int, **kwargs) -> dict:
+        is_best = False
+        monitor_state = None
+        
+        if getattr(self, '_use_monitor', False) and self._monitor:
+            if metrics is not None:
+                is_best = self._monitor(step=self._step, metrics=metrics)
+                monitor_state = self._monitor.state()
+            else:
+                self.logger.debug("Monitor is enabled, but no metrics were provided to checkpoint().")
+
+        _path, out_path = self.checkpointer.save(
+            step=self._step, 
+            monitor_state=monitor_state, 
+            is_best=is_best, 
+            **kwargs
+        )
+        self.env.update_paths(_path, out_path)
+
+    def load_checkpoint(self, step: Union[int, str], **kwargs) -> dict:
         checkpoint, _path, out_path = self.checkpointer.load(step, **kwargs)
         loaded_step = checkpoint.get("step", step)
 
@@ -104,26 +111,34 @@ class ModelLogger:
                 self.telemetry.replay_history(history)
         else:
             self._step = loaded_step
-            self.history.reset()
 
-        if self._use_rollback and checkpoint.get('monitor_state'):
-            self._rollback_monitor.load_state(checkpoint['monitor_state'])
+        if getattr(self, '_use_monitor', False) and self._monitor:
+            monitor_state = checkpoint.get('monitor_state')
+            if monitor_state:
+                self._monitor.load_state(monitor_state)
 
-        if not self.env.eval_mode: 
+        if self.env.fpath != self.checkpointer.fpath:
+            self.env.fpath = self.checkpointer.fpath
+            self.env.work_dir = self.env.fpath / "evaluation" if self.env.eval_mode else self.env.fpath
+
+        if not self.env.eval_mode:
             self.env.update_paths(_path, out_path)
             self.logger.info(f"State restored from step {loaded_step}")
         return checkpoint
 
-    def enable_rollback(self, increase_keys: List[str] = None, decrease_keys: List[str] = None, tolerance: float = 0.1):
-        self._use_rollback = True
-        self._rollback_monitor = _ModelMonitor(self.logger, increase_keys, decrease_keys, tolerance)
-        self.logger.info(f"Rollback Monitor enabled (tol={tolerance})")
-
-    def monitor_check(self, step: int, status: dict) -> tuple:
-        if not self._use_rollback: return False, None, -1
-        degraded = self._rollback_monitor(step, status)
-        best_path = self.env.fpath / f"checkpoint_{self._rollback_monitor.best_step}"
-        return degraded, best_path, self._rollback_monitor.best_step
+    def enable_monitor(
+        self, 
+        increase_keys: Union[list, dict] = None, 
+        decrease_keys: Union[list, dict] = None, 
+        tolerance: float = 0.1, 
+        patience: int = -1
+    ):
+        self._use_monitor = True
+        self._monitor = _ModelMonitor(
+            self.logger, increase_keys, decrease_keys, tolerance, patience
+        )
+        mode = "Infinite" if patience == -1 else str(patience)
+        self.logger.info(f"Monitor Enabled (Patience: {mode}, Tolerance: {tolerance*100:.0f}%)")
 
     def add_config(self, **config):
         if not self.env.eval_mode:
