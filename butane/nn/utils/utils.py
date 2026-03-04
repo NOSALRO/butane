@@ -142,6 +142,11 @@ def load_state(
         if os.path.exists(fpath + "/checkpoint." + suffix):
             cp = torch.load(fpath + "/checkpoint." + suffix, map_location=_device, weights_only=suffix == ".pt")
 
+    if cp is not None:
+        for k, v in cp.items():
+            if not isinstance(v, dict) or "state_dict" not in str(v):
+                returns[k] = v
+
     returns["step"] = cp.get("step")
     returns["model"] = __load(model, "model")
     returns["optimizer"] = __load(optimizer, "optimizer")
