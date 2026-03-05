@@ -163,9 +163,9 @@ class ModelLogger:
 
     def _setup_logging(self, name: str) -> None:
         self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False
         if not self.logger.handlers:
+            self.logger.setLevel(logging.INFO)
+            self.logger.propagate = False
             fmt = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
             sh = logging.StreamHandler(sys.stdout)
             sh.setFormatter(fmt)

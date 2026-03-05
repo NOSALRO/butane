@@ -1,4 +1,4 @@
-import copy
+import sys
 import json
 import logging
 import datetime
@@ -59,6 +59,10 @@ class HistoryManager:
 
         if overwrite and self.stats_file.exists():
             self.stats_file.unlink()
+
+        best_metrics_file = self.work_dir / "best_model/best_metrics.jsonl"
+        if overwrite and best_metrics_file.exists():
+            best_metrics_file.unlink()
 
     def stage_metrics(self, stats: dict) -> Dict[str, Any]:
         flat_stats = self._flatten_dict(stats)
