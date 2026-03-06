@@ -1,4 +1,4 @@
-from typing import Optional, Callable, Union, Tuple
+from typing import Optional, Callable, Union, Tuple, Literal
 import time
 import functools
 import itertools
@@ -52,7 +52,7 @@ class FlowMatching(torch.nn.Module):
         condition: Optional[torch.Tensor] = None,
         keep_record: bool = False,
         multiple_gen_per_condition: bool = False,
-        method: str = 'euler',
+        method: Literal["euler", "heun2", "rk4"] = 'euler',
         reverse: bool = False,
         return_model_outputs: bool = False,
         edm_time_grid: bool = False,
@@ -149,7 +149,7 @@ class FlowMatching(torch.nn.Module):
         keep_record: bool = False,
         multiple_gen_per_condition: bool = False,
         edm_time_grid: bool = False,
-        method: str = 'euler',
+        method: Literal["euler", "heun2", "rk4"] = 'euler',
         batch_size: int = 128,
     ) -> torch.Tensor:
 
@@ -274,7 +274,7 @@ class FlowMatching(torch.nn.Module):
         condition: Optional[torch.Tensor] = None,
         multiple_gen_per_condition: bool = False,
         edm_time_grid: bool = False,
-        method: str = 'euler',
+        method: Literal["euler", "heun2", "rk4"] = 'euler',
     ) -> torch.Tensor:
 
         x1 = self.flow(
