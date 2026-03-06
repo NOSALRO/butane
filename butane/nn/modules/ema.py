@@ -1,4 +1,4 @@
-from typing import Generator, Dict, Any
+from typing import Generator, Dict, Any, Optional
 import contextlib
 import torch
 
@@ -9,6 +9,8 @@ class EMA(torch.nn.Module):
         self,
         model: torch.nn.Module,
         decay: float,
+        power: Optional[float] = None,
+        gamma: float = 1.0,
         start_update_at: int = 1,
         update_every: int = 1,
         exclude_bias: bool = False,
@@ -17,6 +19,8 @@ class EMA(torch.nn.Module):
         super().__init__()
         self.model = model
         self.decay = decay
+        self.power = power
+        self.gamma = gamma
         self._start_update_at = start_update_at
         self._update_every = update_every
         self._exclude_bias = exclude_bias
@@ -51,6 +55,8 @@ class EMA(torch.nn.Module):
         if self._step % self._update_every:
             return
         decay = min(self.decay, (1 + self._step) / (self.warmup_steps + self._step))
+        if self.power is not None: # Is Inverse-Gamma EMA:
+            decay = min(self.decay, 1 - (1/(1 + (self._step/self.gamma))**self.power))
         for param, shadow in self._param_shadow_pairs:
             if shadow.device != param.device:
                 shadow.data = shadow.to(param.device)
