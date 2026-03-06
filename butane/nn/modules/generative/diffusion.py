@@ -1,21 +1,22 @@
 import warnings
-from typing import Optional, Callable, Union
+from typing import Optional, Callable, Union, Literal
 import functools
 import math
 import torch
 from ...functional import *
 from ....math.ops import *
+from ...._utils import *
 
 class Diffusion(torch.nn.Module):
 
     def __init__(
             self,
             num_timesteps: int,
-            scheduler: str = 'linear',
+            scheduler: Literal["linear", "cosine"] = 'linear',
             *,
             scale_timesteps: bool = False,
             model_predicts_noise: bool = True,
-            variance_type: str = 'fixed_large',
+            variance_type: Literal['fixed_large', 'fixed_small', 'learned', 'learned_range'] = 'fixed_large',
     ):
         super().__init__()
         self.num_timesteps = num_timesteps
@@ -308,46 +309,79 @@ class Diffusion(torch.nn.Module):
         timestep_stride: int = 1,
         reverse: bool = False,
         return_model_outputs: bool = False,
+        batch_size: int = 128,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
-        model.eval()
+        _device = self.beta.device
+        model.to(_device)
+        x_T = x_T.to(_device)
+        n_generations = 1
+        n_conditions = x_T.size(0)
+        spatial_dims = x_T.shape[1:]
+
         if condition is not None:
-            condition = condition.to(self.beta.device)
+            condition = apply_recursively(condition, lambda x: x.to(_device))
 
-        if not multiple_gen_per_condition:
-            x_T = x_T.unsqueeze(0)
-
-        if keep_record:
-            generated_samples = torch.empty(x_T.size(0), self.num_timesteps // timestep_stride, *x_T.size()[1:])
-            model_outputs = torch.empty(x_T.size(0), self.num_timesteps // timestep_stride, *x_T.size()[1:])
-        else:
-            generated_samples = torch.empty_like(x_T)
-            model_outputs = torch.empty_like(x_T)
-
-        x_T = x_T.to(self.beta.device)
-
-        timesteps = range(0, self.num_timesteps, timestep_stride)
+        timesteps = list(range(0, self.num_timesteps, timestep_stride))
         if not reverse:
-            timesteps = reversed(timesteps)
+            timesteps = list(reversed(timesteps))
+        n_timesteps = len(timesteps)
 
-        for i, x in enumerate(x_T):
+        if multiple_gen_per_condition:
+            n_generations, n_conditions = x_T.size(0), x_T.size(1)
+            spatial_dims = x_T.shape[2:]
+            x_T = x_T.transpose(0, 1).flatten(0, 1)
+            if condition is not None:
+                condition = apply_recursively(condition, lambda x: x.repeat_interleave(repeats=n_generations, dim=0))
+
+        x_T_iter = batching(x_T, batch_size, dim=0)
+        if condition is not None:
+            condition_iter = batching(condition, batch_size, dim=0)
+        else:
+            condition_iter = itertools.repeat(None)
+
+        out_shape = (n_timesteps, x_T.size(0), *spatial_dims) if keep_record else (x_T.size(0), *spatial_dims)
+        xs = torch.empty(out_shape, device=_device, dtype=x_T.dtype)
+        vs = torch.empty(out_shape, device=_device, dtype=x_T.dtype) if return_model_outputs else None
+
+        current_idx = 0
+        for x_T_batch, cond_batch in zip(x_T_iter, condition_iter):
+            batch_n = x_T_batch.size(0)
+            x = x_T_batch
+
             for j, t in enumerate(timesteps):
-                _t = torch.full((x.size(0), 1), t, device=self.beta.device, dtype=torch.int64)
-                out = model(x, self.scale_timesteps(_t), condition)
+                _t = torch.full((batch_n, 1), t, device=_device, dtype=torch.int64)
+                out = model(x, self.scale_timesteps(_t), cond_batch) 
                 x = sample_fn(x, _t, out)
                 if keep_record:
-                    generated_samples[i, j] = x
+                    xs[j, current_idx: current_idx + batch_n] = x
                     if return_model_outputs:
-                        model_outputs[i, j] = self.__get_epsilon_from_model(out)
+                        vs[j, current_idx: current_idx + batch_n] = self.__get_epsilon_from_model(out)
+
             if not keep_record:
-                generated_samples[i] = x
+                xs[current_idx: current_idx + batch_n] = x
                 if return_model_outputs:
-                    model_outputs[i] = self.__get_epsilon_from_model(out)
-        model.train()
+                    vs[current_idx: current_idx + batch_n] = self.__get_epsilon_from_model(out)
+
+            current_idx += batch_n
+
+        def _revert_shape(tensor_to_reshape: torch.Tensor):
+            return tensor_to_reshape.view(
+                n_timesteps if keep_record else 1,
+                n_conditions,
+                n_generations if multiple_gen_per_condition else 1,
+                *spatial_dims,
+            ).movedim((0, 1, 2), (1, 2, 0)).squeeze(1)
+
+        xs = _revert_shape(xs)
         if return_model_outputs:
-            return generated_samples.squeeze(0), model_outputs.squeeze(0)
-        else:
-            return generated_samples.squeeze(0)
+            vs = _revert_shape(vs)
+
+        if not multiple_gen_per_condition:
+            xs = xs.squeeze(0)
+            if return_model_outputs: vs = vs.squeeze(0)
+
+        return (xs, vs) if return_model_outputs else xs
 
     def __get_epsilon_from_model(self, model_output: torch.Tensor) -> torch.Tensor:
         if self.model_predicts_noise:
