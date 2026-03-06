@@ -54,8 +54,6 @@ class CheckpointManager:
                     entry = {"step": step, **monitor_state['best_metrics']}
                     f.write(json.dumps(entry) + "\n")
 
-            self.logger.info("🏆 Best checkpoint securely routed to: checkpoint_best.pt")
-
         return _path, output_path
 
     def load(

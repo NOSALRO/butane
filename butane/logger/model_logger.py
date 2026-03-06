@@ -83,8 +83,8 @@ class ModelLogger:
 
         is_best = False
         monitor_state = None
-        
-        if getattr(self, '_use_monitor', False) and self._monitor:
+
+        if getattr(self, "_use_monitor", False) and self._monitor:
             if metrics is not None:
                 is_best = self._monitor(step=self._step, metrics=metrics)
                 monitor_state = self._monitor.state()
@@ -123,7 +123,7 @@ class ModelLogger:
 
         if not self.env.eval_mode:
             self.env.update_paths(_path, out_path)
-            self.logger.info(f"State restored from step {loaded_step}")
+        self.logger.info(f"State restored from step {loaded_step}")
         return checkpoint
 
     def enable_monitor(
