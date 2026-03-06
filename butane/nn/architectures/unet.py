@@ -138,6 +138,7 @@ class ResBlockNd(XDependent):
         output_channels: int,
         upsample: bool = False,
         downsample: bool = False,
+        n_groups: int = 32,
         dropout: float = 0.0,
         use_film: bool = True,
         use_shortcut_conv: bool = False,
@@ -148,7 +149,7 @@ class ResBlockNd(XDependent):
         self._use_film = use_film
 
         self.input_layer = torch.nn.Sequential(
-            torch.nn.GroupNorm(32, input_dims[0]),
+            torch.nn.GroupNorm(n_groups, input_dims[0]),
             torch.nn.SiLU(),
         )
         self.block_1 = torch.nn.Sequential(
@@ -174,7 +175,7 @@ class ResBlockNd(XDependent):
             self.up_down_x = torch.nn.Identity()
             self.up_down_h = torch.nn.Identity()
 
-        self.pre_block_2_norm = torch.nn.GroupNorm(32, output_channels)
+        self.pre_block_2_norm = torch.nn.GroupNorm(n_groups, output_channels)
         self.block_2 = torch.nn.Sequential(
             torch.nn.SiLU(),
             torch.nn.Dropout(p=dropout)
@@ -245,6 +246,7 @@ class ConditionProjectionBlockNd(torch.nn.Module):
         n_residual_blocks: int = 1,
         n_downsamples: Optional[int] = None,
         dropout: float = 0.0,
+        n_groups: int = 32,
         attention: Optional[torch.nn.Module] = None,
         use_film: bool = True,
         zero_out: bool = False,
@@ -280,7 +282,7 @@ class ConditionProjectionBlockNd(torch.nn.Module):
                 self.blocks.append(attention(_updated_input_dims[0]))
 
         self.pre_projection_block = torch.nn.Sequential(
-            torch.nn.GroupNorm(32, _updated_input_dims[0]),
+            torch.nn.GroupNorm(n_groups, _updated_input_dims[0]),
             torch.nn.SiLU(),
             torch.nn.Flatten(1) if linear_projection else torch.nn.Identity()
         )
@@ -355,6 +357,7 @@ class UNetNd(torch.nn.Module):
         output_channels: Optional[int] = None,
         n_middle_blocks: int = 2,
         dropout: float = 0.0,
+        n_groups: int = 32,
         resample_with_resblock: bool = False,
         conv_resample: bool = True,
         deconv_upsample: bool = False,
@@ -560,7 +563,7 @@ class UNetNd(torch.nn.Module):
             kernel_size=1,
             n_heads=self._attention_heads,
             dropout_p=attention_dropout,
-            prenorm=partial(torch.nn.GroupNorm, num_groups=32),
+            prenorm=partial(torch.nn.GroupNorm, num_groups=n_groups),
             bias=True,
             apply_residual=True,
             zero_out=zero_conv,
@@ -587,6 +590,7 @@ class UNetNd(torch.nn.Module):
                         channels=self._channels[0],
                         embedding_size=self._embedding_size,
                         dropout=condition_dropout,
+                        n_groups=n_groups,
                         n_residual_blocks=condition_n_residuals,
                         n_downsamples=condition_n_downsamples,
                         zero_out=zero_conv,
@@ -622,7 +626,7 @@ class UNetNd(torch.nn.Module):
                 n_heads=self._attention_heads,
                 apply_residual=True,
                 dropout_p=attention_dropout,
-                prenorm=partial(torch.nn.GroupNorm, num_groups=min(32, 2 ** math.floor(math.log2(self._condition_output_dims[0])))),
+                prenorm=partial(torch.nn.GroupNorm, num_groups=min(n_groups, 2 ** math.floor(math.log2(self._condition_output_dims[0])))),
                 bias=True,
                 zero_out=zero_conv,
             )
@@ -653,6 +657,7 @@ class UNetNd(torch.nn.Module):
                         input_dims=_downsample_input_dims,
                         embedding_size=self._embedding_size,
                         dropout=self._dropout,
+                        n_groups=n_groups,
                         output_channels=ch,
                         zero_out=zero_conv,
                         use_film=self._use_film
@@ -674,6 +679,7 @@ class UNetNd(torch.nn.Module):
                         input_dims=_downsample_input_dims,
                         embedding_size=self._embedding_size,
                         dropout=self._dropout,
+                        n_groups=n_groups,
                         output_channels=ch,
                         use_film=self._use_film,
                         zero_out=zero_conv,
@@ -694,6 +700,7 @@ class UNetNd(torch.nn.Module):
                     input_dims=_middle_block_input_dims,
                     embedding_size=self._embedding_size,
                     dropout=self._dropout,
+                    n_groups=n_groups,
                     output_channels=_middle_block_input_dims[0],
                     zero_out=zero_conv,
                     use_film=self._use_film))
@@ -733,6 +740,7 @@ class UNetNd(torch.nn.Module):
                             input_dims=_upsample_input_dims,
                             embedding_size=self._embedding_size,
                             dropout=self._dropout,
+                            n_groups=n_groups,
                             output_channels=ch,
                             use_film=self._use_film,
                             upsample=True,
@@ -748,13 +756,14 @@ class UNetNd(torch.nn.Module):
                 input_dims=[_upsample_input_dims[0] * 2, *_upsample_input_dims[1:]],
                 embedding_size=self._embedding_size,
                 dropout=self._dropout,
+                n_groups=n_groups,
                 output_channels=_upsample_input_dims[0],
                 use_film=self._use_film,
                 zero_out=zero_conv,
             )
 
         self.output_block = torch.nn.Sequential(
-            torch.nn.GroupNorm(32, _upsample_input_dims[0]),
+            torch.nn.GroupNorm(n_groups, _upsample_input_dims[0]),
             torch.nn.SiLU(),
             utils.zero_module(self.conv(_upsample_input_dims[0], self._output_channels, 3, padding=1))
         )
