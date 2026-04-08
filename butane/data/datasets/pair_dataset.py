@@ -210,7 +210,7 @@ class PairDataset(Dataset):
         split_2_data = data[indices[num_el_after_split:]]
         split_1_data = data[indices[:num_el_after_split]]
 
-        if targets is not None:
+        if self._has_targets() and self._has_targets_pair():
             split_1_targets = targets[indices[:num_el_after_split]]
             split_2_targets = targets[indices[num_el_after_split:]]
         return (split_1_data, split_1_targets), (split_2_data, split_2_targets)
