@@ -1,4 +1,5 @@
-from typing import Optional, List, Tuple, Dict, Union
+from typing import Dict, List, Optional, Tuple, Union
+
 import torch
 
 from ..transforms import Transforms
@@ -12,7 +13,7 @@ class Dataset(torch.utils.data.Dataset):
         *,
         on_demand_device_load: bool = False,
         return_tuple: bool = False,
-        device: torch.device = 'cpu',
+        device: torch.device = "cpu",
     ) -> None:
 
         super().__init__()
@@ -30,7 +31,10 @@ class Dataset(torch.utils.data.Dataset):
     def _has_targets(self):
         return self.targets is not None and self.targets.numel() > 0
 
-    def __getitem__(self, idx: Union[int, List[int]]) -> Union[Tuple[torch.Tensor], Dict[str, torch.Tensor]]:
+    def __getitem__(
+        self,
+        idx: Union[int, List[int]],
+    ) -> Union[Tuple[torch.Tensor], Dict[str, torch.Tensor]]:
         _data = self.data[idx]
         if self._on_demand_device_load:
             _data = _data.to(self._device)
@@ -44,21 +48,31 @@ class Dataset(torch.utils.data.Dataset):
             _targets = self.targets[idx]
 
             if isinstance(idx, int):
-                _targets = _targets if self._target_transforms is None else self._target_transforms(_targets)
+                _targets = (
+                    _targets
+                    if self._target_transforms is None
+                    else self._target_transforms(_targets)
+                )
             else:
-                _targets = _targets if self._target_transforms is None else self._vectorized_target_transforms(_targets)
+                _targets = (
+                    _targets
+                    if self._target_transforms is None
+                    else self._vectorized_target_transforms(_targets)
+                )
 
             if self._on_demand_device_load:
                 _targets = _targets.to(_data.device)
             return self._convert_to_tuple({"data": _data, "targets": _targets})
         else:
-            return self._convert_to_tuple({ "data": _data })
+            return self._convert_to_tuple({"data": _data})
 
-    def split(self, percentage: float):
+    def split(self, percentage: float, generator: Optional[torch.Generator] = None):
         if percentage == 0:
             return None
         _transforms = self._transforms
-        (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage)
+        (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(
+            percentage, generator=generator
+        )
 
         self.data = split_1_data
         self.targets = split_1_targets
@@ -68,8 +82,11 @@ class Dataset(torch.utils.data.Dataset):
             targets=split_2_targets,
             on_demand_device_load=self._on_demand_device_load,
             device=self._device,
-            return_tuple=self._return_tuple)
-        splitted_ds.set_transforms(transforms=_transforms, target_transforms=self._target_transforms)
+            return_tuple=self._return_tuple,
+        )
+        splitted_ds.set_transforms(
+            transforms=_transforms, target_transforms=self._target_transforms
+        )
         return splitted_ds
 
     def flatten(self, dim: int = 1) -> None:
@@ -84,7 +101,7 @@ class Dataset(torch.utils.data.Dataset):
         return self
 
     def save(self, filepath: str) -> None:
-        base_path = filepath.rsplit('.', 1)[0]
+        base_path = filepath.rsplit(".", 1)[0]
         torch.save(self.data.cpu().detach(), f"{base_path}_data.pt")
         if self._has_targets():
             torch.save(self.targets.cpu().detach(), f"{base_path}_targets.pt")
@@ -118,7 +135,11 @@ class Dataset(torch.utils.data.Dataset):
         if self._has_targets():
             self.targets = self.targets[mask]
 
-    def set_transforms(self, transforms: Optional[Transforms] = None, target_transforms: Optional[Transforms] = None):
+    def set_transforms(
+        self,
+        transforms: Optional[Transforms] = None,
+        target_transforms: Optional[Transforms] = None,
+    ):
         if transforms is not None:
             self._transforms = transforms
             self._vectorized_transforms = torch.vmap(transforms)
@@ -141,10 +162,10 @@ class Dataset(torch.utils.data.Dataset):
     def return_tuple(self) -> None:
         self._return_tuple = True
 
-    def _split(self, percentage: float):
+    def _split(self, percentage: float, generator: Optional[torch.Generator] = None) -> None:
         split_1_targets = None
         split_2_targets = None
-        indices = torch.randperm(self.data.size(0))
+        indices = torch.randperm(self.data.size(0), generator=generator)
         num_el_after_split = int(percentage * self.data.size(0))
 
         split_2_data = self.data[indices[num_el_after_split:]]
@@ -155,11 +176,13 @@ class Dataset(torch.utils.data.Dataset):
             split_2_targets = self.targets[indices[num_el_after_split:]]
         return (split_1_data, split_1_targets), (split_2_data, split_2_targets)
 
-    def _convert_to_tuple(self, returns: dict) -> Union[Tuple[torch.Tensor], Dict[str, torch.Tensor]]:
+    def _convert_to_tuple(
+        self, returns: dict
+    ) -> Union[Tuple[torch.Tensor], Dict[str, torch.Tensor]]:
         if self._return_tuple:
-            data = returns['data']
+            data = returns["data"]
             if self._has_targets():
-                target = returns['targets']
+                target = returns["targets"]
                 return data, target
             return data
         else:

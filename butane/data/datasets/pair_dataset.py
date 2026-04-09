@@ -1,13 +1,13 @@
-from typing import Optional, List, Tuple, Dict, Union
 import copy
+from typing import Dict, List, Optional, Tuple, Union
+
 import torch
 
-from .dataset import Dataset
 from ..transforms import Transforms
+from .dataset import Dataset
 
 
 class PairDataset(Dataset):
-
     def __init__(
         self,
         data: torch.Tensor,
@@ -17,7 +17,7 @@ class PairDataset(Dataset):
         *,
         on_demand_device_load: bool = False,
         return_tuple: bool = False,
-        device: torch.device = 'cpu',
+        device: torch.device = "cpu",
     ) -> None:
 
         super().__init__()
@@ -32,7 +32,10 @@ class PairDataset(Dataset):
         self._return_tuple = return_tuple
         if not self._on_demand_device_load:
             self.data, self.data_pair = self.data.to(self._device), self.data_pair.to(self._device)
-            self.targets, self.targets_pair = self.targets.to(self._device), self.targets_pair.to(self._device)
+            self.targets, self.targets_pair = (
+                self.targets.to(self._device),
+                self.targets_pair.to(self._device),
+            )
         self._set_up_pairing()
 
     def _set_up_pairing(self):
@@ -54,7 +57,9 @@ class PairDataset(Dataset):
 
             for i in range(self._target_loc.size(0)):
                 pair = (self.targets_pair == self._target_loc[i]).nonzero().flatten()
-                self._target_map[i] = torch.nn.functional.pad(pair, (0, max_num_of_instances - pair.numel()), value=-1, mode='constant')
+                self._target_map[i] = torch.nn.functional.pad(
+                    pair, (0, max_num_of_instances - pair.numel()), value=-1, mode="constant"
+                )
 
             self._col_idx = (self._target_map != -1).sum(dim=1)
             self._anchor_row_idx = torch.searchsorted(unique_targets_pair, self.targets.view(-1))
@@ -72,8 +77,7 @@ class PairDataset(Dataset):
 
     # TODO: Optimize
     def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
-
-        device = self._device if not self._on_demand_device_load else 'cpu'
+        device = self._device if not self._on_demand_device_load else "cpu"
         use_vectorized_transforms = False
         if isinstance(idx, slice):
             start, stop, step = idx.indices(len(self))
@@ -81,7 +85,7 @@ class PairDataset(Dataset):
             use_vectorized_transforms = True
         elif isinstance(idx, int):
             idx = torch.tensor([idx], device=device)
-        else: # List
+        else:  # List
             idx = torch.tensor(idx, device=device)
             use_vectorized_transforms = True
 
@@ -91,7 +95,7 @@ class PairDataset(Dataset):
             random_cols = (torch.rand(limits.numel(), device=device) * limits).long()
             pair_idx = self._target_map[row_indices, random_cols]
         else:
-            pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx), ), device=device)
+            pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx),), device=device)
 
         _data = self.data[idx.item() if idx.numel() == 1 else idx.ravel()]
         _data_pair = self.data_pair[pair_idx.item() if pair_idx.numel() == 1 else pair_idx.ravel()]
@@ -100,19 +104,34 @@ class PairDataset(Dataset):
             _data_pair = _data_pair.to(self._device)
 
         if self._transforms is not None:
-            _data = self._vectorized_transforms(_data) if use_vectorized_transforms else self._transforms(_data)
+            _data = (
+                self._vectorized_transforms(_data)
+                if use_vectorized_transforms
+                else self._transforms(_data)
+            )
         if self._pair_transforms is not None:
-            _data_pair = self._vectorized_pair_transforms(_data_pair) if use_vectorized_transforms else self._pair_transforms(_data_pair)
+            _data_pair = (
+                self._vectorized_pair_transforms(_data_pair)
+                if use_vectorized_transforms
+                else self._pair_transforms(_data_pair)
+            )
         return self._convert_to_tuple(dict(data=_data, targets=_data_pair))
 
-
-    def split(self, percentage: float):
+    def split(
+        self,
+        percentage: float,
+        generator: Optional[torch.Generator] = None,
+    ):
         if percentage == 0:
             return None
         _transforms = self._transforms
         _pair_transforms = self._pair_transforms
-        (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(percentage, self.data, self.targets)
-        (split_1_data_pair, split_1_targets_pair), (split_2_data_pair, split_2_targets_pair) = self._split(percentage, self.data_pair, self.targets_pair)
+        (split_1_data, split_1_targets), (split_2_data, split_2_targets) = self._split(
+            percentage, self.data, self.targets, generator=generator
+        )
+        (split_1_data_pair, split_1_targets_pair), (split_2_data_pair, split_2_targets_pair) = (
+            self._split(percentage, self.data_pair, self.targets_pair, generator=generator)
+        )
 
         self.data = split_1_data
         self.targets = split_1_targets
@@ -127,7 +146,8 @@ class PairDataset(Dataset):
             targets_pair=split_2_targets_pair,
             on_demand_device_load=self._on_demand_device_load,
             device=self._device,
-            return_tuple=self._return_tuple)
+            return_tuple=self._return_tuple,
+        )
         splitted_ds.set_transforms(_transforms, _pair_transforms)
         return splitted_ds
 
@@ -151,7 +171,11 @@ class PairDataset(Dataset):
         self._device = device
         return self
 
-    def set_transforms(self, transforms: Optional[Transforms] = None, pair_transforms: Optional[Transforms] = None):
+    def set_transforms(
+        self,
+        transforms: Optional[Transforms] = None,
+        pair_transforms: Optional[Transforms] = None,
+    ):
         if transforms is not None:
             self._transforms = transforms
             self._vectorized_transforms = torch.vmap(transforms)
@@ -163,7 +187,7 @@ class PairDataset(Dataset):
         return self._transforms, self._pair_transforms
 
     def save(self, filepath: str) -> None:
-        base_path = filepath.rsplit('.', 1)[0]
+        base_path = filepath.rsplit(".", 1)[0]
         torch.save(self.data.cpu().detach(), f"{base_path}_data.pt")
         torch.save(self.data_pair.cpu().detach(), f"{base_path}_data_pair.pt")
         if self._has_targets():
@@ -201,10 +225,11 @@ class PairDataset(Dataset):
         percentage: float,
         data: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
+        generator: Optional[torch.Generator] = None,
     ) -> Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         split_1_targets = None
         split_2_targets = None
-        indices = torch.randperm(data.size(0))
+        indices = torch.randperm(data.size(0), generator=generator)
         num_el_after_split = int(percentage * data.size(0))
 
         split_2_data = data[indices[num_el_after_split:]]
@@ -215,11 +240,14 @@ class PairDataset(Dataset):
             split_2_targets = targets[indices[num_el_after_split:]]
         return (split_1_data, split_1_targets), (split_2_data, split_2_targets)
 
-    def _convert_to_tuple(self, returns: dict) -> Union[Tuple[torch.Tensor], Dict[str, torch.Tensor]]:
+    def _convert_to_tuple(
+        self,
+        returns: dict,
+    ) -> Union[Tuple[torch.Tensor], Dict[str, torch.Tensor]]:
         if self._return_tuple:
-            data = returns['data']
+            data = returns["data"]
             if self._has_targets():
-                target = returns['targets']
+                target = returns["targets"]
                 return data, target
             return data
         else:
