@@ -32,6 +32,9 @@ def compute_grad_norm(model: torch.nn.Module) -> float:
     device = grads[0].device
     return torch.norm(torch.stack([torch.norm(g, 2.0).to(device) for g in grads]), 2.0).double().item()
 
+def get_lr(optimizer: torch.optim.Optimizer):
+    return optimizer.param_groups[0]['lr']
+
 def calculate_output_size(
     *modules, 
     input_dims: Union[IntParams, Tuple[IntParams, ...], List[IntParams], Dict[str, IntParams]]
