@@ -224,7 +224,7 @@ class TimeMLP(torch.nn.Module):
                         if isinstance(c_components, dict)
                         else tuple(c_components),
                         dim=-1
-                    )
+                    )if not isinstance(c_components, torch.Tensor) else c_components
             else:
                 if self._condition_projection and self._custom_condition_module:
                     if isinstance(c, dict): c_emb = self.condition_projection_block(c)
