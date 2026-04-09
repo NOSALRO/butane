@@ -14,3 +14,7 @@ viz.py
 *__pycache__
 extra/
 .envrc
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+!pixi.lock
