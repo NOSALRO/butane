@@ -13,7 +13,7 @@ class FlowMatching(torch.nn.Module):
     def __init__(self, sigma: float = 0.1):
         super().__init__()
         # trick to get module's device
-        self._dummy_param = torch.nn.Parameter(torch.empty(0))
+        self.register_buffer("_device_buffer", torch.zeros(1))
         self._sigma = sigma
         self.__source_distribution = None
 
@@ -31,16 +31,21 @@ class FlowMatching(torch.nn.Module):
             epsilon = torch.randn((n,), device=self._dummy_param.device)
             sigma = (epsilon * std + mu).exp()
             time = (1 / (1 + sigma)).clamp(0.0001, 1.0)
-            return time
+            return time.unsqueeze(-1)
         else:
-            return torch.rand(n, 1, device=self._dummy_param.device)
+            return torch.rand(n, 1, device=self.device)
 
     def forward(
         self,
         x0: torch.Tensor,
         x1: torch.Tensor,
         t: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]: ...
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        raise NotImplementedError("Subclasses must implement forward()")
+
+    @property
+    def device(self):
+        return self._device_buffer.device
 
     # Fix condition repettition -> Move it inside the loop, for memory efficiency
     @torch.no_grad()
@@ -54,29 +59,29 @@ class FlowMatching(torch.nn.Module):
         multiple_gen_per_condition: bool = False,
         method: Literal["euler", "heun2", "rk4"] = 'euler',
         reverse: bool = False,
+        guidance_scale: float = 1.0,
         return_model_outputs: bool = False,
         edm_time_grid: bool = False,
         batch_size: int = 128,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
-        _device = self._dummy_param.device
-        model.to(_device)
-        x0 = x0.to(_device)
+        model.to(self.device)
+        x0 = x0.to(self.device)
         n_generations = 1
         n_conditions = x0.size(0)
         spatial_dims = x0.shape[1:]
 
         if condition is not None:
-            condition = apply_recursively(condition, lambda x: x.to(_device))
+            condition = apply_recursively(condition, lambda x: x.to(self.device))
 
         if edm_time_grid:
-            timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=reverse).to(_device)
+            timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=reverse).to(self.device)
         else:
             timesteps = torch.linspace(
                 0. if not reverse else 1.,
                 1. if not reverse else 0.,
                 n_timesteps + 1,
-                device=_device
+                device=self.device
             )
 
         if multiple_gen_per_condition:
@@ -86,7 +91,14 @@ class FlowMatching(torch.nn.Module):
             if condition is not None:
                 condition = apply_recursively(condition, lambda x: x.repeat_interleave(repeats=n_generations, dim=0))
 
-        func = lambda t, x, c: model(x, t.expand(x.size(0), 1), c)
+        def func(t, x, c):
+            t = t.expand(x.size(0)).unsqueeze(-1)  # (B, 1)
+            if guidance_scale != 1.0 and c is not None:
+                v_cond = model(x, t, c)
+                v_uncond = model(x, t, None)
+                return v_uncond + guidance_scale * (v_cond - v_uncond)
+            else:
+                return model(x, t, c)
 
         x0_iter = batching(x0, batch_size, dim=0)
         if condition is not None:
@@ -95,8 +107,8 @@ class FlowMatching(torch.nn.Module):
             condition_iter = itertools.repeat(None)
 
         out_shape = (n_timesteps, x0.size(0), *spatial_dims) if keep_record else (x0.size(0), *spatial_dims)
-        xs = torch.empty(out_shape, device=_device, dtype=x0.dtype)
-        vs = torch.empty(out_shape, device=_device, dtype=x0.dtype) if return_model_outputs else None
+        xs = torch.empty(out_shape, device=self.device, dtype=x0.dtype)
+        vs = torch.empty(out_shape, device=self.device, dtype=x0.dtype) if return_model_outputs else None
 
         current_idx = 0
         for x0_batch, cond_batch in zip(x0_iter, condition_iter):
@@ -153,15 +165,14 @@ class FlowMatching(torch.nn.Module):
         batch_size: int = 128,
     ) -> torch.Tensor:
 
-        _device = self._dummy_param.device
-        model.to(_device)
-        x1 = x1.to(_device)
+        model.to(self.device)
+        x1 = x1.to(self.device)
         n_generations = 1
         n_conditions = x1.size(0)
         spatial_dims = x1.shape[1:]
 
         if condition is not None:
-            condition = apply_recursively(condition, lambda x: x.to(_device))
+            condition = apply_recursively(condition, lambda x: x.to(self.device))
 
         if multiple_gen_per_condition:
             n_generations, n_conditions = x1.size(0), x1.size(1)
@@ -170,11 +181,11 @@ class FlowMatching(torch.nn.Module):
             if condition is not None:
                 condition = apply_recursively(condition, lambda x: x.repeat_interleave(repeats=n_generations, dim=0))
 
-        z = (torch.randn_like(x1).to(_device) < 0) * 2.0 - 1.0
+        z = (torch.randn_like(x1).to(self.device) < 0) * 2.0 - 1.0
         if edm_time_grid:
-            timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=True).to(_device)
+            timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=True).to(self.device)
         else:
-            timesteps = torch.linspace(1, 0, n_timesteps + 1, device=_device)
+            timesteps = torch.linspace(1, 0, n_timesteps + 1, device=self.device)
 
         x1_iter = batching(x1, batch_size, dim=0)
         z_iter  = batching(z,  batch_size, dim=0) # Batch z synchronously
@@ -185,8 +196,8 @@ class FlowMatching(torch.nn.Module):
             condition_iter = itertools.repeat(None)
 
         out_shape = (n_timesteps, x1.size(0), *spatial_dims) if keep_record else (x1.size(0), *spatial_dims)
-        xs = torch.empty(out_shape, device=_device, dtype=x1.dtype)
-        lls = torch.empty(x1.size(0), device=_device, dtype=x1.dtype)
+        xs = torch.empty(out_shape, device=self.device, dtype=x1.dtype)
+        lls = torch.empty(x1.size(0), device=self.device, dtype=x1.dtype)
 
         current_idx = 0
 
@@ -194,25 +205,25 @@ class FlowMatching(torch.nn.Module):
             batch_n = x1_batch.size(0)
 
             def func(t, x, c):
-                 x_val = x[0]
+                 x_val, _ = x
                  with torch.set_grad_enabled(True):
-                     x_val.requires_grad_()
+                    x_val = x_val.detach().requires_grad_(True)
 
-                     t_in = t.repeat(x_val.size(0)).unsqueeze(-1) if t.ndim == 0 else t
-                     ut = model(x_val, t_in, c)
+                    t_in = t.expand(x_val.size(0)).unsqueeze(-1)  # (B, 1)
+                    ut = model(x_val, t_in, c)
 
-                     # Hutchinson's Trace Estimator
-                     ut_dot_z = torch.einsum("ij,ij->i", ut.flatten(1), z.flatten(1))
-                     grad_ut_dot_z = torch.autograd.grad(
-                         outputs=ut_dot_z, inputs=x_val, 
-                         grad_outputs=torch.ones_like(ut_dot_z), 
-                         create_graph=True
-                     )[0]
-                     div = torch.einsum("ij,ij->i", grad_ut_dot_z.flatten(1), z.flatten(1))
-                     return ut.detach(), div.detach()
+                    # Hutchinson's Trace Estimator
+                    ut_dot_z = torch.einsum("ij,ij->i", ut.flatten(1), z_batch.flatten(1))
+                    grad_ut_dot_z = torch.autograd.grad(
+                        outputs=ut_dot_z,
+                        inputs=x_val,
+                        grad_outputs=torch.ones_like(ut_dot_z),
+                    )[0]
+                    div = torch.einsum("ij,ij->i", grad_ut_dot_z.flatten(1), z_batch.flatten(1))
+                    return ut.detach(), div.detach()
 
 
-            init_state = (x1_batch, torch.zeros(batch_n, device=_device))
+            init_state = (x1_batch, torch.zeros(batch_n, device=self.device))
 
             # Returns: ((x_traj, logdet_traj), dx_traj)
             traj, _ = odeint(
@@ -234,7 +245,7 @@ class FlowMatching(torch.nn.Module):
             x0_final = x_traj[-1]
             delta_logp = logdet_traj[-1]
 
-            log_p0 = self.__source_distribution.log_prob(x0_final.cpu()).to(_device)
+            log_p0 = self.__source_distribution.log_prob(x0_final.cpu()).to(self.device)
             log_p0 = log_p0.flatten()
             total_ll = log_p0 + delta_logp
 
@@ -313,7 +324,8 @@ class FlowMatching(torch.nn.Module):
         t = torch.arange(0, n_timesteps, dtype=torch.float64) / (n_timesteps - 1)
         timesteps = (sigma_max ** (1/r) + t * (sigma_min ** (1/r) - sigma_max**(1/r))) ** r
         timesteps = (timesteps / (1 + timesteps)).squeeze()
-        timesteps = torch.cat([timesteps, torch.full_like(timesteps[:1], t[0])])
+        # timesteps = torch.cat([timesteps, torch.full_like(timesteps[:1], t[0])])
+        timesteps = torch.cat([timesteps, torch.full_like(timesteps[:1], 1.0)])
         if not reverse:
             timesteps = 1 - timesteps.clamp(0., 1.)
         return timesteps.float()
@@ -351,7 +363,7 @@ class TargetConditionalFlowMatching(FlowMatching):
         sigma_t = 1 - (1 - self._sigma) * t
         epsilon = torch.randn_like(x0)
         x_t = mu_t + sigma_t * epsilon
-        u_t = (x1 - (1 - self._sigma) * x_t) / (1 - (1 - self._sigma) * t)
+        u_t = (x1 - (1 - self._sigma) * x_t) / (1 - (1 - self._sigma) * t).clamp(min=1e-8)
         return x_t, u_t
 
 class MiddleVarianceFlowMatching(FlowMatching):
