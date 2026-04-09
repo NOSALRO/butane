@@ -80,9 +80,9 @@ class UpsampleNd(torch.nn.Module):
 
             # Using kernel_size = stride ensures exact doubling without overlapping artifacts
             self.upsample_layer = self.conv_transpose(
-                in_channels=input_dims[0], 
-                out_channels=output_channels, 
-                kernel_size=_stride, 
+                in_channels=input_dims[0],
+                out_channels=output_channels,
+                kernel_size=_stride,
                 stride=_stride,
                 padding=1,
             )
@@ -100,7 +100,7 @@ class UpsampleNd(torch.nn.Module):
             if self.dims == 3:
                 h = torch.nn.functional.interpolate(
                     x,
-                    (x.shape[2], x.shape[3] * 2, x.shape[4] * 2), 
+                    (x.shape[2], x.shape[3] * 2, x.shape[4] * 2),
                     mode="nearest"
                 )
             else:
@@ -182,7 +182,7 @@ class ResBlockNd(XDependent):
         )
 
         self.output_layer = (
-            utils.zero_module(self.conv(output_channels, output_channels, kernel_size=3, padding=1)) 
+            utils.zero_module(self.conv(output_channels, output_channels, kernel_size=3, padding=1))
             if zero_out else
             self.conv(output_channels, output_channels, kernel_size=3, padding=1)
         )
@@ -370,6 +370,7 @@ class UNetNd(torch.nn.Module):
         use_film: bool = True,
         time_dependent: bool = True,
         time_embedding_size: Optional[int] = None,
+        time_scaling_coeff: float = 1.,
         embedding_size: Optional[int] = None,
         embedder: Optional[torch.nn.Module] = None,
         learn_embeddings: bool = False,
@@ -396,6 +397,7 @@ class UNetNd(torch.nn.Module):
 
         self._use_film = use_film
         self._time_dependent = time_dependent
+        self._time_scaling_coeff = time_scaling_coeff
         self._resample_with_resblock = resample_with_resblock
         self._n_residual_blocks = n_residual_blocks
         self._n_middle_blocks = n_middle_blocks
@@ -931,7 +933,7 @@ class UNetNd(torch.nn.Module):
         elif isinstance(c, tuple):
             condition = c
         elif isinstance(c, torch.Tensor):
-            if (self._condition_output_dims is not None and 
+            if (self._condition_output_dims is not None and
                 tuple(c.shape[1:]) == tuple(self._condition_output_dims) and
                 self._bypass_capable):
                 projection = c
@@ -939,6 +941,7 @@ class UNetNd(torch.nn.Module):
                 condition = c
 
         # TODO: Check timestep scaling * 1000
+        t = t * self._time_scaling_coeff
         x, emb, c_emb = self.prepare_conditioning(x, t, c=condition, y=labels, z=projection)
         return self._forward(x, emb, c_emb)
 
@@ -987,9 +990,9 @@ class UNetNd(torch.nn.Module):
         modes = []
         if getattr(self, "_is_flat_condition", False):
             modes.append("Flat Embedding")
-            if self._condition_concat: 
+            if self._condition_concat:
                 modes.append("Concat to Global Emb")
-            elif self._condition_add: 
+            elif self._condition_add:
                 modes.append("Add to Global Emb")
             elif self._use_film and not self._condition_projection:
                 modes.append("Direct FiLM")
