@@ -62,26 +62,29 @@ class CheckpointManager:
         **modules,
     ) -> Tuple[dict, Path, Path]:
 
-        if str(step).lower() == "best":
-            ckpt_folder = self.fpath.absolute() / f"best_model/"
-            if not ckpt_folder.exists():
-                self.logger.error(f"No best checkpoint found at {ckpt_folder}")
-                raise FileNotFoundError(f"Best checkpoint missing.")
-            self.logger.info("Loading the absolute best model weights...")
-        else:
-            potential_path = Path(step)
-            if potential_path.exists() and potential_path.is_dir():
-                ckpt_folder = potential_path
-
-                # Update the root fpath to the parent of this explicit checkpoint
-                self.fpath = ckpt_folder.parent
-                try:
-                    parsed_step = ckpt_folder.name.split('_')[-1]
-                    self.logger.info(f"Loaded explicit path. Inferred step {parsed_step}. Root updated to {self.fpath}")
-                except Exception:
-                    self.logger.warning(f"Could not parse step from folder name: {ckpt_folder.name}")
+        if isinstance(step, str):
+            if str(step).lower() == "best":
+                ckpt_folder = self.fpath.absolute() / f"best_model/"
+                if not ckpt_folder.exists():
+                    self.logger.error(f"No best checkpoint found at {ckpt_folder}")
+                    raise FileNotFoundError(f"Best checkpoint missing.")
+                self.logger.info("Loading the absolute best model weights...")
             else:
-                ckpt_folder = self.fpath.absolute() / f"checkpoint_{step}"
+                potential_path = Path(step)
+                if potential_path.exists() and potential_path.is_dir():
+                    ckpt_folder = potential_path
+
+                    # Update the root fpath to the parent of this explicit checkpoint
+                    self.fpath = ckpt_folder.parent
+                    try:
+                        parsed_step = ckpt_folder.name.split('_')[-1]
+                        self.logger.info(f"Loaded explicit path. Inferred step {parsed_step}. Root updated to {self.fpath}")
+                    except Exception:
+                        self.logger.warning(f"Could not parse step from folder name: {ckpt_folder.name}")
+                else:
+                    ckpt_folder = self.fpath.absolute() / f"checkpoint_{step}"
+        elif isinstance(step, int):
+            ckpt_folder = self.fpath.absolute() / f"checkpoint_{step}"
 
         checkpoint = nn.utils.load_state(str(ckpt_folder), **modules)
 
