@@ -38,41 +38,40 @@ class PairDataset(Dataset):
                 self.targets.to(self._device),
                 self.targets_pair.to(self._device),
             )
-        self._set_up_pairing()
+        if self._has_targets() and self._has_targets_pair():
+            self._set_up_pairing()
 
     def _set_up_pairing(self):
-        if self._has_targets() and self._has_targets_pair():
-            # Clean samples that cannot be matched
-            unique_targets_pair = torch.unique(self.targets_pair)
-            mask = torch.isin(self.targets.view(-1), unique_targets_pair)
-            # Make a target-agnostic indexing map
-            self._anchor_row_idx = torch.searchsorted(unique_targets_pair, self.targets.view(-1))
+        # Clean samples that cannot be matched
+        unique_targets_pair = torch.unique(self.targets_pair)
+        mask = torch.isin(self.targets.view(-1), unique_targets_pair)
 
-            if not mask.all():
-                self.data = self.data[mask]
-                self.targets = self.targets[mask]
+        if not mask.all():
+            self.data = self.data[mask]
+            self.targets = self.targets[mask]
 
-            # Get the class index sample correspondance
-            _target_loc, indices = torch.unique(self.targets, return_inverse=True)
-            # Get the maximum number of data points for one class
-            max_num_of_instances = torch.bincount(self.targets_pair.flatten()).max().item()
+        # Make a target-agnostic indexing map
+        _target_loc, self._anchor_row_idx = torch.unique(
+            self.targets.view(-1),
+            return_inverse=True
+        )
 
-            # Create a map of indices for all the possible samples per class
-            num_elems = [0]
-            self._target_map_csr = []
-            for i in range(_target_loc.size(0)):
-                pair = (self.targets_pair == _target_loc[i]).nonzero().flatten()
-                self._target_map_csr.append(pair)
-                num_elems.append(pair.numel())
-            num_elems = torch.tensor(num_elems).cumsum(0)
-            self._start_idx = num_elems[:-1].long()
-            self._end_idx = num_elems[1:].long()
-            self._target_map_csr = torch.cat(self._target_map_csr).long()
+        # Create a map of indices for all the possible samples per class
+        num_elems = [0]
+        self._target_map_csr = []
+        for i in range(_target_loc.size(0)):
+            pair = (self.targets_pair == _target_loc[i]).nonzero().flatten()
+            self._target_map_csr.append(pair)
+            num_elems.append(pair.numel())
+        num_elems = torch.tensor(num_elems).cumsum(0)
+        self._start_idx = num_elems[:-1].long()
+        self._end_idx = num_elems[1:].long()
+        self._target_map_csr = torch.cat(self._target_map_csr).long()
 
-            if not self._on_demand_device_load:
-                self._start_idx = self._start_idx.to(self._device)
-                self._end_idx = self._end_idx.to(self._device)
-                self._target_map_csr = self._target_map_csr.to(self._device)
+        if not self._on_demand_device_load:
+            self._start_idx = self._start_idx.to(self._device)
+            self._end_idx = self._end_idx.to(self._device)
+            self._target_map_csr = self._target_map_csr.to(self._device)
 
     def _has_targets(self):
         return self.targets is not None and self.targets.numel() > 0
@@ -80,7 +79,6 @@ class PairDataset(Dataset):
     def _has_targets_pair(self):
         return self.targets_pair is not None and self.targets_pair.numel() > 0
 
-    # TODO: Optimize
     def __getitem__(self, idx: Union[int, List[int]]) -> Dict[str, torch.Tensor]:
         device = self._device if not self._on_demand_device_load else "cpu"
         use_vectorized_transforms = False
@@ -103,14 +101,15 @@ class PairDataset(Dataset):
                 hashed_offsets = (idx * 73856093) % lengths
                 pair_idx = self._target_map_csr[start_i + hashed_offsets]
             else:
-                random_samples = torch.rand(row_indices.numel(), device=device)
-                random_samples = (end_i - start_i) * random_samples + start_i
-                pair_idx = self._target_map_csr[random_samples.long()]
+                lengths = end_i - start_i
+                offsets = (torch.rand(lengths.shape, device=device) * lengths).long()
+                offsets = torch.clamp(offsets, max=lengths - 1)
+                pair_idx = self._target_map_csr[start_i + offsets]
         else:
             pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx),), device=device)
 
-        _data = self.data[idx.item() if idx.numel() == 1 else idx.ravel()]
-        _data_pair = self.data_pair[pair_idx.item() if pair_idx.numel() == 1 else pair_idx.ravel()]
+        _data = self.data[idx]
+        _data_pair = self.data_pair[pair_idx]
         if self._on_demand_device_load:
             _data = _data.to(self._device)
             _data_pair = _data_pair.to(self._device)
