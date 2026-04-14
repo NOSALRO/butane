@@ -81,7 +81,7 @@ class PatchEmbeddingsNd(torch.nn.Module):
         self,
         input_dims: IntParams,
         d_model: int,
-        patch_size: Union[int, IntParams] = 16,
+        patch_size: int | IntParams = 16,
         bias: Optional[bool] = False,
         normalization: Optional[torch.nn.Module] = None,
     ):

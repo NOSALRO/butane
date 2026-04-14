@@ -1,13 +1,14 @@
-from typing import Union, Optional, Callable
 import math
+from typing import Callable, Optional, Union
+
 import torch
 
 from ..._helpers import _fill_defaults, _prod, module_name
-from ..utils import utils
 from ..._typedefs import *
+from ..utils import utils
+
 
 class _AttentionTemplate(torch.nn.Module):
-
     def __init__(
         self,
         d_model: int,
@@ -42,8 +43,14 @@ class _AttentionTemplate(torch.nn.Module):
         self.value = torch.nn.Linear(self._kv_input_size, self._d_model)
         # fmt: on
 
-        self.norm_1 = torch.nn.LayerNorm(self._d_model) if self._prenorm_enabled else torch.nn.Identity()
-        self.norm_2 = torch.nn.LayerNorm(self._kv_input_size) if self._prenorm_enabled and self._is_cross else torch.nn.Identity()
+        self.norm_1 = (
+            torch.nn.LayerNorm(self._d_model) if self._prenorm_enabled else torch.nn.Identity()
+        )
+        self.norm_2 = (
+            torch.nn.LayerNorm(self._kv_input_size)
+            if self._prenorm_enabled and self._is_cross
+            else torch.nn.Identity()
+        )
 
         self.dropout = torch.nn.Dropout(dropout_p)
 
@@ -53,18 +60,20 @@ class _AttentionTemplate(torch.nn.Module):
             else utils.zero_module(torch.nn.Linear(self._d_model, self._d_model))
         )
 
-    def forward(self, x1: torch.Tensor, x2: Optional[torch.Tensor] = None, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        x1: torch.Tensor,
+        x2: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
 
-        assert x1.dim() >= 3, "Attention's input data should be (batch, seq_len, feature_dim)"
+        assert x1.dim() == 3, f"Sequence attention expects 3D inputs (B, L, D), got {x1.dim()}D"
         if x2 is None:
             x2 = x1
-        assert x2.dim() >= 3, "Attention's input data should be (batch, seq_len, feature_dim)"
+        assert x2.dim() == 3, f"Sequence attention expects 3D inputs (B, L, D), got {x2.dim()}D"
 
         B, L_Q, *_spatial = x1.shape
         _, L_KV, _ = x2.shape
-
-        if x1.dim() > 3: x1 = x1.flatten(2)
-        if x2.dim() > 3: x2 = x2.flatten(2)
 
         q_input = self.norm_1(x1) if self._prenorm_enabled else x1
 
@@ -102,6 +111,7 @@ class _AttentionTemplate(torch.nn.Module):
                 value=_v,
                 attn_mask=mask.bool() if mask is not None else None,
                 is_causal=self._causal,
+                dropout_p=self.dropout.p if self.training else 0.0, # <-- ADD THIS
                 scale=1.0 / self.scale_factor
             )
 
@@ -113,18 +123,26 @@ class _AttentionTemplate(torch.nn.Module):
             out = x1 + out
         return out.reshape(*out.shape[:-1], *_spatial)
 
+
 class SelfAttention(_AttentionTemplate):
     def __init__(self, d_model: int, **kwargs):
-        kwargs.pop('kv_input_size', None)
+        kwargs.pop("kv_input_size", None)
         super().__init__(d_model, kv_input_size=None, **kwargs)
 
     def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         return super().forward(x1=x1, x2=None, mask=mask)
 
-class CrossAttention(_AttentionTemplate): ...
+
+class CrossAttention(_AttentionTemplate):
+    def __init__(self, d_model: int, **kwargs):
+        if kwargs.get("kv_input_size") is None:
+            kwargs["kv_input_size"] = d_model
+
+        super().__init__(d_model, **kwargs)
+        self._is_cross = True
+
 
 class _SpatialAttentionTemplate(torch.nn.Module):
-
     conv: torch.nn.Module
     N: int
 
@@ -160,9 +178,12 @@ class _SpatialAttentionTemplate(torch.nn.Module):
 
         self.kv_conv = self.conv
         if kv_n_dims is not None and kv_n_dims != self.N:
-            if kv_n_dims == 1: self.kv_conv = torch.nn.Conv1d
-            elif kv_n_dims == 2: self.kv_conv = torch.nn.Conv2d
-            elif kv_n_dims == 3: self.kv_conv = torch.nn.Conv3d
+            if kv_n_dims == 1:
+                self.kv_conv = torch.nn.Conv1d
+            elif kv_n_dims == 2:
+                self.kv_conv = torch.nn.Conv2d
+            elif kv_n_dims == 3:
+                self.kv_conv = torch.nn.Conv3d
 
         # fmt: off
         self.query = self.conv(self._d_model, self._d_model, kernel_size, padding=_padding, bias=bias)
@@ -183,7 +204,7 @@ class _SpatialAttentionTemplate(torch.nn.Module):
                 self.norm_1 = prenorm(num_channels=self._d_model)
                 self.norm_2 = prenorm(num_channels=self._kv_input_size) if self._is_cross else None
             elif module_name(prenorm) == "LayerNorm":
-                raise ValueError("Cannot use LayerNorm in self-attention")
+                raise ValueError("Cannot use LayerNorm in spatial attention")
             else:
                 self.norm_1 = prenorm(self._d_model)
                 self.norm_2 = prenorm(self._kv_input_size) if self._is_cross else None
@@ -202,7 +223,7 @@ class _SpatialAttentionTemplate(torch.nn.Module):
         B1, C1, *spatial1 = x1.shape
         B2, C2, *spatial2 = x2.shape
 
-        if self.N == 1 and len(spatial1) > 1: 
+        if self.N == 1 and len(spatial1) > 1:
             x1 = x1.flatten(2)
         if self.N == 1 and len(spatial2) > 1:
             x2 = x2.flatten(2)
@@ -230,7 +251,6 @@ class _SpatialAttentionTemplate(torch.nn.Module):
         v = v.transpose(1, 2).reshape(B2, L2, self._n_heads, self.d_k).transpose(1, 2)
 
         if not self._flash_attention:
-
             _qk = torch.matmul(q, k.transpose(-1, -2)) / self.scale_factor
 
             if mask is not None:
@@ -245,8 +265,8 @@ class _SpatialAttentionTemplate(torch.nn.Module):
                 key=k,
                 value=v,
                 attn_mask=mask.bool() if mask is not None else None,
-                dropout_p=self._dropout_p if self.training else 0.0, 
-                scale=1.0 / self.scale_factor
+                dropout_p=self._dropout_p if self.training else 0.0,
+                scale=1.0 / self.scale_factor,
             )
         _attention = _attention.transpose(1, 2).reshape(B1, L1, C1).transpose(1, 2)
 
@@ -261,28 +281,40 @@ class _SpatialAttentionTemplate(torch.nn.Module):
             out = residual_ + out
         return out
 
+
 class SpatialSelfAttention(_SpatialAttentionTemplate):
     def __init__(self, d_model: int, **kwargs):
-        kwargs.pop('kv_input_size', None)
-        kwargs.pop('kv_n_dims', None)
+        kwargs.pop("kv_input_size", None)
+        kwargs.pop("kv_n_dims", None)
         super().__init__(d_model, kv_input_size=None, kv_n_dims=None, **kwargs)
 
     def forward(self, x1: torch.Tensor, mask: Optional[torch.Tensor] = None):
         return super().forward(x1, x2=None, mask=mask)
 
-class SpatialCrossAttention(_SpatialAttentionTemplate): ...
+
+class SpatialCrossAttention(_SpatialAttentionTemplate):
+    def __init__(self, d_model: int, **kwargs):
+        if kwargs.get("kv_input_size") is None:
+            kwargs["kv_input_size"] = d_model
+
+        super().__init__(d_model, **kwargs)
+        self._is_cross = True
+
 
 class SpatialSelfAttention1d(SpatialSelfAttention):
     conv = torch.nn.Conv1d
     N = 1
 
+
 class SpatialSelfAttention2d(SpatialSelfAttention):
     conv = torch.nn.Conv2d
     N = 2
 
+
 class SpatialCrossAttention1d(SpatialCrossAttention):
     conv = torch.nn.Conv1d
     N = 1
+
 
 class SpatialCrossAttention2d(SpatialCrossAttention):
     conv = torch.nn.Conv2d
