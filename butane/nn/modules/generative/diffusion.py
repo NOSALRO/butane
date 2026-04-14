@@ -2,7 +2,7 @@ import functools
 import itertools
 import math
 import warnings
-from typing import Callable, Literal, Optional, Union
+from typing import Callable, Literal
 
 import torch
 
@@ -40,7 +40,7 @@ class Diffusion(torch.nn.Module):
         timestep_spacing: Literal["linspace", "leading", "trailing"] = "linspace",
         scale_timesteps: bool = False,
         clip: bool = True,
-        clip_range: Union[List[int], Tuple[int, int]] = [-1.0, 1.0],
+        clip_range: list[int] | tuple[int, int] = [-1.0, 1.0],
         thresholding: bool = False,
         dynamic_thresholding_ratio: float = 0.995,
         sample_max_value: float = 1.0,
@@ -114,8 +114,8 @@ class Diffusion(torch.nn.Module):
     def q_params(
         self,
         x_0: torch.Tensor,
-        t: Union[torch.Tensor, int],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        t: torch.Tensor | int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculates parameters for the forward marginal $q(\\mathbf{x}_t \\vert \\mathbf{x}_0)$.
 
         The forward diffusion process defines a distribution for $\\mathbf{x}_t$ at any
@@ -142,9 +142,9 @@ class Diffusion(torch.nn.Module):
         self,
         x_0: torch.Tensor,
         x_t: torch.Tensor,
-        t: Union[torch.Tensor, int],
-        step_idx: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        t: torch.Tensor | int,
+        step_idx: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Calculates parameters for the posterior q(x_{t-1} | x_t, x_0).
 
         The posterior $q(\\mathbf{x}_{t-1} \\vert \\mathbf{x}_t, \\mathbf{x}_0)$ is a Gaussian
@@ -184,10 +184,10 @@ class Diffusion(torch.nn.Module):
     def p_params(
         self,
         x_t: torch.Tensor,
-        t: Union[torch.Tensor, int],
+        t: torch.Tensor | int,
         model_output: torch.Tensor,
-        step_idx: int = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        step_idx: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
         t = t.view(-1)
         predicted_variance = None
@@ -238,7 +238,7 @@ class Diffusion(torch.nn.Module):
         self,
         x_0: torch.Tensor,
         epsilon: torch.Tensor,
-        t: Union[torch.Tensor, int],
+        t: torch.Tensor | int,
     ) -> torch.Tensor:
         mu, var = self.q_params(x_0, t)
         return mu + torch.sqrt(var) * epsilon
@@ -246,17 +246,17 @@ class Diffusion(torch.nn.Module):
     def reverse(
         self,
         x_t: torch.Tensor,
-        t: Union[torch.Tensor, int],
+        t: torch.Tensor | int,
         model_output: torch.Tensor,
         step_idx: int,
-        generator: Optional[torch.Generator] = None,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         x_t_minus_1, sigma, _ = self.p_params(x_t, t, model_output, step_idx=step_idx)
         z = torch.randn(x_t.shape, device=x_t.device, dtype=x_t.dtype, generator=generator)
         z_mask = (self.prev_timesteps[step_idx] >= 0).float()
         return x_t_minus_1 + sigma * z * z_mask
 
-    def sample_timesteps(self, n: int, generator: Optional[torch.Generator] = None) -> torch.Tensor:
+    def sample_timesteps(self, n: int, generator: torch.Generator | None = None) -> torch.Tensor:
         t = torch.randint(
             0,
             self.num_timesteps,
@@ -271,7 +271,7 @@ class Diffusion(torch.nn.Module):
         self,
         x_0: torch.Tensor,
         epsilon: torch.Tensor,
-        t: Union[torch.Tensor, int],
+        t: torch.Tensor | int,
     ) -> torch.Tensor:
         if self.prediction_type == "v":
             t = t.view(-1)
@@ -286,15 +286,15 @@ class Diffusion(torch.nn.Module):
         self,
         model: torch.nn.Module,
         x_T: torch.Tensor,
-        condition: Optional[torch.Tensor] = None,
+        condition: torch.Tensor | None = None,
         keep_record: bool = False,
         multiple_gen_per_condition: bool = False,
         return_model_outputs: bool = False,
         guidance_scale: float = 1.0,
-        num_inference_steps: Optional[int] = None,
-        timestep_spacing: Optional[Literal["linspace", "leading", "trailing"]] = None,
-        generator: Optional[torch.Generator] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        num_inference_steps: int | None = None,
+        timestep_spacing: Literal["linspace", "leading", "trailing"] | None = None,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
 
         if num_inference_steps is not None or timestep_spacing is not None:
             self._set_timesteps(num_inference_steps, timestep_spacing)
@@ -320,16 +320,16 @@ class Diffusion(torch.nn.Module):
         self,
         model: torch.nn.Module,
         x_T: torch.Tensor,
-        condition: Optional[torch.Tensor] = None,
+        condition: torch.Tensor | None = None,
         keep_record: bool = False,
         multiple_gen_per_condition: bool = False,
         reverse: bool = False,
         return_model_outputs: bool = False,
         guidance_scale: float = 1.0,
-        num_inference_steps: Optional[int] = None,
-        timestep_spacing: Optional[Literal["linspace", "leading", "trailing"]] = None,
-        generator: Optional[torch.Generator] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        num_inference_steps: int | None = None,
+        timestep_spacing: Literal["linspace", "leading", "trailing"] | None = None,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
 
         sample_fn = self._ddim if not reverse else functools.partial(self._ddim, reverse=True)
 
@@ -361,15 +361,15 @@ class Diffusion(torch.nn.Module):
         x_T: torch.Tensor,
         x_original: torch.Tensor,
         mask: torch.Tensor,
-        condition: Optional[torch.Tensor] = None,
+        condition: torch.Tensor | None = None,
         guidance_scale: float = 1.0,
         multiple_gen_per_mask: bool = False,
         keep_record: bool = False,
         return_model_outputs: bool = False,
         resample_steps: int = 1,
         batch_size: int = 128,
-        generator: Optional[torch.Generator] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
 
         _device = self.betas.device
         model.to(_device)
@@ -497,12 +497,12 @@ class Diffusion(torch.nn.Module):
     def _ddim(
         self,
         x_t: torch.Tensor,
-        t: Union[torch.Tensor, int],
+        t: torch.Tensor | int,
         model_output: torch.Tensor,
         eta: float = 0.0,
         reverse: bool = False,
-        step_idx: Optional[int] = None,
-        generator: Optional[torch.Generator] = None,
+        step_idx: int | None = None,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         t = t.view(-1)
         epsilon_hat = self._get_epsilon_from_model(x_t, t, model_output)
@@ -551,7 +551,7 @@ class Diffusion(torch.nn.Module):
     def _derive_x_0_from_epsilon(
         self,
         x_t: torch.Tensor,
-        t: Union[torch.Tensor, int],
+        t: torch.Tensor | int,
         epsilon: torch.Tensor,
     ) -> torch.Tensor:
         t = t.view(-1)
@@ -587,15 +587,15 @@ class Diffusion(torch.nn.Module):
         sample_fn: Callable,
         model: torch.nn.Module,
         x_T: torch.Tensor,
-        condition: Optional[torch.Tensor] = None,
+        condition: torch.Tensor | None = None,
         keep_record: bool = False,
         multiple_gen_per_condition: bool = False,
         guidance_scale: float = 1.0,
         reverse: bool = False,
         return_model_outputs: bool = False,
         batch_size: int = 128,
-        generator: Optional[torch.Generator] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
 
         _device = self.betas.device
         model.to(_device)
