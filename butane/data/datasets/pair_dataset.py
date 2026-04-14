@@ -108,8 +108,8 @@ class PairDataset(Dataset):
         else:
             pair_idx = torch.randint(0, self.data_pair.size(0), size=(len(idx),), device=device)
 
-        _data = self.data[idx]
-        _data_pair = self.data_pair[pair_idx]
+        _data = self.data[idx.item() if idx.numel() == 1 else idx.ravel()]
+        _data_pair = self.data_pair[pair_idx.item() if idx.numel() == 1 else pair_idx.ravel()]
         if self._on_demand_device_load:
             _data = _data.to(self._device)
             _data_pair = _data_pair.to(self._device)
@@ -148,7 +148,8 @@ class PairDataset(Dataset):
         self.targets = split_1_targets
         self.data_pair = split_1_data_pair
         self.targets_pair = split_1_targets_pair
-        self._set_up_pairing()
+        if self._has_targets() and self._has_targets_pair():
+            self._set_up_pairing()
 
         splitted_ds = PairDataset(
             data=split_2_data,
