@@ -6,7 +6,7 @@ from ..._helpers import module_name
 from ..._utils import apply_recursively
 
 
-def zero_module(module) -> torch.nn.Module:
+def zero_module(module: torch.nn.Module) -> torch.nn.Module:
     for p in module.parameters():
         p.detach().zero_()
     return module

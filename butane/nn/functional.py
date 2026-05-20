@@ -44,7 +44,7 @@ def _fgm(
     grad: torch.Tensor | None = None,
     mask: torch.Tensor | None = None,
     clip_range: list[float] | None = None,
-    use_sign: bool = False,
+    use_sign: bool = True,
 ) -> torch.Tensor:
 
     x_prime = x.detach().clone().requires_grad_(True)
@@ -77,7 +77,7 @@ def pgm(
     random_start: bool = True,
     mask: torch.Tensor | None = None,
     clip_range: list[float] | None = None,
-    use_sign: bool = False,
+    use_sign: bool = True,
 ) -> torch.Tensor:
 
     alpha = epsilon / steps
@@ -135,7 +135,7 @@ def fgm(
     random_start: bool = False,
     mask: torch.Tensor | None = None,
     clip_range: list[float] | None = None,
-    use_sign: bool = False,
+    use_sign: bool = True,
 ) -> torch.Tensor:
     return pgm(
         x=x,
@@ -148,3 +148,121 @@ def fgm(
         clip_range=clip_range,
         use_sign=use_sign,
     )
+
+
+def _spatial_fgm(
+    x: torch.Tensor,
+    base_grid: torch.Tensor,
+    tau: torch.Tensor,
+    J: Callable,
+    epsilon: float,
+    grad: torch.Tensor | None = None,
+    mask: torch.Tensor | None = None,
+    use_sign: bool = True,
+) -> torch.Tensor:
+
+    tau_prime = tau.detach().clone().requires_grad_(True)
+
+    if grad is None:
+        # 1. Warp the image using the current deformation
+        warped_grid = base_grid + tau_prime
+        x_warped = torch.nn.functional.grid_sample(
+            x, warped_grid, mode="bilinear", padding_mode="reflection", align_corners=True
+        )
+        loss = J(x_warped)
+        grad = torch.autograd.grad(loss, tau_prime, retain_graph=False, create_graph=False)[0]
+
+    if mask is not None:
+        grad *= mask
+
+    with torch.no_grad():
+        if use_sign:
+            perturbed_tau = tau_prime + epsilon * grad.sign()
+        else:
+            grad_norm = grad.flatten(1).norm(dim=-1)
+            while grad_norm.dim() != grad.dim():
+                grad_norm = grad_norm[..., None]
+            perturbed_tau = tau_prime + epsilon * grad / (grad_norm + 1e-12)
+
+    return perturbed_tau.detach()
+
+
+def spatial_pgm(
+    x: torch.Tensor,
+    J: Callable,
+    epsilon: float,
+    steps: int = 10,
+    grad: torch.Tensor | None = None,
+    random_start: bool = True,
+    mask: torch.Tensor | None = None,
+    clip_range: list[float] | None = None,
+    use_sign: bool = True,
+) -> torch.Tensor:
+
+    assert x.ndim == 4, "This only works for images for now!"
+    B, C, H, W = x.shape
+    alpha = epsilon / steps
+
+    grid_y, grid_x = torch.meshgrid(
+        torch.linspace(-1, 1, H, device=x.device),
+        torch.linspace(-1, 1, W, device=x.device),
+        indexing="ij",
+    )
+    base_grid = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0).expand(B, -1, -1, -1)
+
+    tau_init = torch.zeros_like(base_grid)
+    tau_prime = tau_init.clone()
+    perturbed_tau = tau_init.clone()
+
+    if random_start:
+        grad = None
+        if use_sign:
+            noise = torch.empty_like(perturbed_tau).uniform_(-1.0, 1.0) * epsilon
+        else:
+            noise = torch.randn_like(perturbed_tau)
+            noise_norm = noise.flatten(1).norm(p=2, dim=-1)
+            while noise_norm.dim() != noise.dim():
+                noise_norm = noise_norm[..., None]
+            radius = torch.rand_like(noise_norm) * epsilon
+            noise = (noise / (noise_norm + 1e-12)) * radius
+        perturbed_tau = perturbed_tau + noise
+
+    for _ in range(steps):
+        tau_prime = _spatial_fgm(
+            x=x,
+            base_grid=base_grid,
+            tau=perturbed_tau,
+            J=J,
+            grad=grad,
+            epsilon=alpha,
+            mask=mask,
+            use_sign=use_sign,
+        )
+
+        # Calculate deviation from the zero-deformation state
+        delta = tau_prime - tau_init
+
+        # Projection (Bound the deformation distance)
+        if use_sign:
+            delta = delta.clamp(-epsilon, epsilon)
+        else:
+            delta_norm = delta.flatten(1).norm(p=2, dim=-1)
+            while delta_norm.dim() != delta.dim():
+                delta_norm = delta_norm[..., None]
+            factor = torch.clamp(epsilon / (delta_norm + 1e-12), max=1.0)
+            delta = delta * factor
+
+        perturbed_tau = tau_init + delta
+        grad = None
+
+    # Apply the final optimized deformation to the image/condition
+    with torch.no_grad():
+        final_grid = base_grid + perturbed_tau
+        perturbed_x = torch.nn.functional.grid_sample(
+            x, final_grid, mode="bilinear", padding_mode="reflection", align_corners=True
+        )
+
+        if clip_range is not None:
+            perturbed_x = torch.clamp(perturbed_x, min=clip_range[0], max=clip_range[1])
+
+    return perturbed_x.detach()

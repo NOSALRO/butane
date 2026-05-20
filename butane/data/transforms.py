@@ -7,7 +7,7 @@ class Transforms:
         self.is_sequence = is_sequence
 
     def _forward_single(self, x: torch.Tensor) -> torch.Tensor:
-        transformed = x.clone()
+        transformed = x
         for transform in self._transforms:
             transformed = transform(transformed)
         return transformed

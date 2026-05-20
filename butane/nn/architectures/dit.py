@@ -163,7 +163,6 @@ class FinalBlock(torch.nn.Module):
         return x
 
 
-# TODO: Add Multimodal conditioning option.
 class DiTNd(torch.nn.Module):
     patch_embedder: type[PatchEmbeddingsNd]
     N: int = -1
@@ -209,7 +208,9 @@ class DiTNd(torch.nn.Module):
         self._learn_condition_embeddings = learn_condition_embeddings
         self._learn_input_embeddings = learn_input_embeddings
 
+        # TODO Implement:
         self._in_context_condition = condition_in_context
+        if self._in_context_condition: raise NotImplementedError
         self._cross_attention_condition = condition_cross_attention
         self._additive_condition = condition_additive
         assert (

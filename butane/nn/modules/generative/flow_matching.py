@@ -1,4 +1,4 @@
-from typing import Optional, Callable, Union, Tuple, Literal
+from typing import Callable, Literal
 import time
 import functools
 import itertools
@@ -40,7 +40,7 @@ class FlowMatching(torch.nn.Module):
         x0: torch.Tensor,
         x1: torch.Tensor,
         t: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("Subclasses must implement forward()")
 
     @property
@@ -54,7 +54,7 @@ class FlowMatching(torch.nn.Module):
         model: torch.nn.Module,
         x0: torch.Tensor,
         n_timesteps: int,
-        condition: Optional[torch.Tensor] = None,
+        condition: torch.Tensor | None = None,
         keep_record: bool = False,
         multiple_gen_per_condition: bool = False,
         method: Literal["euler", "heun2", "rk4"] = 'euler',
@@ -63,8 +63,11 @@ class FlowMatching(torch.nn.Module):
         return_model_outputs: bool = False,
         edm_time_grid: bool = False,
         batch_size: int = 128,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        target_device: torch.device | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
 
+        if target_device is None:
+            target_device = self.device
         model.to(self.device)
         x0 = x0.to(self.device)
         n_generations = 1
@@ -107,8 +110,8 @@ class FlowMatching(torch.nn.Module):
             condition_iter = itertools.repeat(None)
 
         out_shape = (n_timesteps, x0.size(0), *spatial_dims) if keep_record else (x0.size(0), *spatial_dims)
-        xs = torch.empty(out_shape, device=self.device, dtype=x0.dtype)
-        vs = torch.empty(out_shape, device=self.device, dtype=x0.dtype) if return_model_outputs else None
+        xs = torch.empty(out_shape, device=target_device, dtype=x0.dtype)
+        vs = torch.empty(out_shape, device=target_device, dtype=x0.dtype) if return_model_outputs else None
 
         current_idx = 0
         for x0_batch, cond_batch in zip(x0_iter, condition_iter):
@@ -124,9 +127,9 @@ class FlowMatching(torch.nn.Module):
             # x = torchdiffeq.odeint(functools.partial(func, c=cond_batch), x0_batch, timesteps, method='explicit_adams')
             # v = torch.zeros_like(x)
             if keep_record:
-                xs[:, current_idx: current_idx + batch_n] = x[1:]
+                xs[:, current_idx: current_idx + batch_n] = x[1:].to(target_device)
                 if return_model_outputs:
-                    vs[:, current_idx: current_idx + batch_n] = v[1:]
+                    vs[:, current_idx: current_idx + batch_n] = v[1:].to(target_device)
             else:
                 xs[current_idx: current_idx + batch_n] = x
                 if return_model_outputs:
@@ -157,14 +160,17 @@ class FlowMatching(torch.nn.Module):
         model: torch.nn.Module,
         x1: torch.Tensor,
         n_timesteps: int,
-        condition: Optional[torch.Tensor] = None,
+        condition: torch.Tensor | None = None,
         keep_record: bool = False,
         multiple_gen_per_condition: bool = False,
         edm_time_grid: bool = False,
         method: Literal["euler", "heun2", "rk4"] = 'euler',
         batch_size: int = 128,
+        target_device: torch.device | None = None
     ) -> torch.Tensor:
 
+        if target_device is None:
+            target_devcie = self.device
         model.to(self.device)
         x1 = x1.to(self.device)
         n_generations = 1
@@ -196,8 +202,8 @@ class FlowMatching(torch.nn.Module):
             condition_iter = itertools.repeat(None)
 
         out_shape = (n_timesteps, x1.size(0), *spatial_dims) if keep_record else (x1.size(0), *spatial_dims)
-        xs = torch.empty(out_shape, device=self.device, dtype=x1.dtype)
-        lls = torch.empty(x1.size(0), device=self.device, dtype=x1.dtype)
+        xs = torch.empty(out_shape, device=target_device, dtype=x1.dtype)
+        lls = torch.empty(x1.size(0), device=target_device, dtype=x1.dtype)
 
         current_idx = 0
 
@@ -237,17 +243,17 @@ class FlowMatching(torch.nn.Module):
             x_traj, logdet_traj = traj
 
             if keep_record:
-                xs[:, current_idx : current_idx + batch_n] = x_traj[1:]
+                xs[:, current_idx : current_idx + batch_n] = x_traj[1:].to(target_device)
             else:
-                xs[current_idx : current_idx + batch_n] = x_traj[-1]
+                xs[current_idx : current_idx + batch_n] = x_traj[-1].to(target_device)
 
 
-            x0_final = x_traj[-1]
-            delta_logp = logdet_traj[-1]
+            x0_final = x_traj[-1].to(target_device)
+            delta_logp = logdet_traj[-1].to(target_device)
 
-            log_p0 = self.__source_distribution.log_prob(x0_final.cpu()).to(self.device)
-            log_p0 = log_p0.flatten()
-            total_ll = log_p0 + delta_logp
+            log_p0 = self.__source_distribution.log_prob(x0_final.cpu()).to(target_device)
+            log_p0 = log_p0.flatten().to(target_device)
+            total_ll = log_p0 + delta_logp.to(target_device)
 
             lls[current_idx : current_idx + batch_n] = total_ll
 
@@ -282,10 +288,11 @@ class FlowMatching(torch.nn.Module):
         x0: torch.Tensor,
         n_timesteps: int,
         monte_carlo_estiamtes: int = 5,
-        condition: Optional[torch.Tensor] = None,
+        condition: torch.Tensor | None = None,
         multiple_gen_per_condition: bool = False,
         edm_time_grid: bool = False,
         method: Literal["euler", "heun2", "rk4"] = 'euler',
+        target_device: torch.device | None = None,
     ) -> torch.Tensor:
 
         x1 = self.flow(
@@ -298,6 +305,7 @@ class FlowMatching(torch.nn.Module):
             method=method,
             return_model_outputs=False,
             edm_time_grid=edm_time_grid,
+            target_device=target_device,
         )
 
         monte_carlo_lls = []
@@ -310,6 +318,7 @@ class FlowMatching(torch.nn.Module):
                 keep_record=False,
                 multiple_gen_per_condition=multiple_gen_per_condition,
                 edm_time_grid=edm_time_grid,
+                target_device=target_device,
             )
             monte_carlo_lls.append(log_likelihood)
         monte_carlo_lls = torch.stack(monte_carlo_lls)
@@ -337,7 +346,7 @@ class ConditionalFlowMatching(FlowMatching):
         x0: torch.Tensor,
         x1: torch.Tensor,
         t: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
 
         while len(x0.size()) != len(t.size()):
             t = t[..., None]
@@ -355,7 +364,7 @@ class TargetConditionalFlowMatching(FlowMatching):
         x0: torch.Tensor,
         x1: torch.Tensor,
         t: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
 
         while len(x0.size()) != len(t.size()):
             t = t[..., None]
@@ -373,7 +382,7 @@ class MiddleVarianceFlowMatching(FlowMatching):
         x0: torch.Tensor,
         x1: torch.Tensor,
         t: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
 
         while len(x0.size()) != len(t.size()):
             t = t[..., None]
@@ -397,7 +406,7 @@ class CurvedFlowMatching(FlowMatching):
         x0: torch.Tensor,
         x1: torch.Tensor,
         t: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
 
         while len(x0.size()) != len(t.size()):
             t = t[..., None]
@@ -414,7 +423,7 @@ class CurvedFlowMatching(FlowMatching):
         x1: torch.Tensor,
         t: torch.Tensor,
         sigma: float,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
 
         while len(x0.size()) != len(t.size()):
             t = t[..., None]

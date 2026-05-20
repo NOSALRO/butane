@@ -1,11 +1,10 @@
 from typing import Optional, Union, Iterator
 import torch
 
-@torch.jit.script
 def batch_arange(
     starts: torch.Tensor,
-    stops: Optional[torch.Tensor] = None,
-    steps: Optional[Union[torch.Tensor, int]] = None
+    stops: torch.Tensor | None = None,
+    steps: torch.Tensor | int | None = None
 ) -> torch.Tensor:
 
     if starts is None and stops is None:
