@@ -1,6 +1,7 @@
 import copy
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any
 
+import numpy as np
 import torch
 
 from ..utils import batch_arange
@@ -10,176 +11,179 @@ from .dataset import Dataset
 class TrajectoryDataset(Dataset):
     def __init__(
         self,
-        data: Optional[torch.Tensor],
-        horizon: int,
+        data: torch.Tensor | list[torch.Tensor | np.ndarray] | None = None,
         *,
-        context: Optional[int] = None,
-        shift: int = 1,
-        loop: bool = False,
-        drop_last: bool = False,
-        **kwargs,
+        horizon: int = 1,
+        history: int = 1,
+        align_start: bool = False,
+        on_demand_device_load: bool = False,
+        return_tuple: bool = False,
+        device: torch.device = "cpu",
     ) -> None:
 
-        super().__init__(**kwargs)
-        assert shift > 0, "shift cannot be 0"
+        super().__init__(
+            on_demand_device_load=on_demand_device_load,
+            return_tuple=return_tuple,
+            device=device,
+        )
 
-        self.data = torch.tensor([]) if data is None else data.detach().clone().float()
+        assert horizon > 0, "Horizon cannot be less than 1."
+        assert history > 0, "History cannot be less than 1."
+
+        self.episode_lens: torch.Tensor | None = None
+        self.episode_start: torch.Tensor | None = None
+        self.episode_end: torch.Tensor | None = None
+
+        self._ingest_data(data)
         self.horizon = horizon
-        self.shift = shift
-        self._loop = loop
-        self._drop_last = drop_last
-        self.context = context if context is not None else horizon
-        _, self.num_steps, self.feature_dims = self.data.shape
+        self.history = history - 1
+        self.align_start = align_start
 
-        self.__prepare_data()
-        if not self._on_demand_device_load:
-            self.data = self.data.to(self._device)
-            self.targets = self.targets.to(self._device)
+        indices = torch.arange(len(self.sample_to_episode), dtype=torch.long)
+        ep_starts = self.episode_start[self.sample_to_episode]
+        ep_ends = self.episode_end[self.sample_to_episode]
 
-        if self._drop_last and self.num_steps < 2 * self.horizon:
-            raise ValueError("time series too short for the requested horizon")
+        sample_start = torch.maximum(indices - self.history, ep_starts)
+        if not self.align_start:
+            sample_ends = torch.minimum(indices + self.horizon, ep_ends)
+        else:
+            sample_ends = torch.minimum(sample_start + self.horizon, ep_ends)
+
+        self.samples = torch.stack([self.sample_to_episode, sample_start, sample_ends], dim=1)
+
+        self.pad_left_fn = self._default_pad_left
+        self.pad_right_fn = self._default_pad_right
+
+    def _sample(
+        self, tensor: torch.Tensor, idx: int | list[Any] | torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        sample = self.samples[idx]
+
+        # Extract integer values for slicing
+        start_idx = sample[1].item()
+        end_idx = sample[2].item()
+
+        pad_left_len = start_idx - (idx - self.history)
+        history_seq = tensor[start_idx : idx + 1]
+
+        if pad_left_len > 0:
+            history_seq = self.pad_left_fn(history_seq, pad_left_len)
+
+        if self.align_start:
+            pad_right_len = start_idx + self.horizon - end_idx
+            horizon_seq = tensor[start_idx:end_idx]
+        else:
+            pad_right_len = idx + self.horizon - end_idx
+            horizon_seq = tensor[idx:end_idx]
+
+        if pad_right_len > 0:
+            horizon_seq = self.pad_right_fn(horizon_seq, pad_right_len)
+
+        return history_seq, horizon_seq
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor] | dict[str, dict[str, torch.Tensor]]:
+        if isinstance(self.data, torch.Tensor):
+            return self._sample(self.data, idx)
+
+        data_dict = {}
+        target_dict = {}
+
+        for key, tensor in self.data.items():
+            hist, horiz = self._sample(tensor, idx)
+            data_dict[key] = hist
+            target_dict[key] = horiz
+
+        return {
+            "data": data_dict,
+            "targets": target_dict
+        }
 
     def __len__(self) -> int:
-        if not self._drop_last:
-            return ((self.data.size(0) * (self.num_steps - self.context)) // self.shift) + 1
-        else:
-            return (
-                (self.data.size(0) * (self.num_steps - (self.context + self.horizon))) // self.shift
-            ) + 1
+        return len(self.sample_to_episode)
 
-    def __getitem__(self, idx: int) -> torch.Tensor:
-        if not isinstance(idx, int):
-            return self.__batched_get(idx)
+    def _ingest_data(
+        self,
+        data: torch.Tensor
+        | np.ndarray
+        | list[torch.Tensor | np.ndarray]
+        | dict[str, torch.Tensor | np.ndarray | list[torch.Tensor | np.ndarray]],
+    ):
+        if isinstance(data, (torch.Tensor, np.ndarray)):
+            data_tensor = torch.as_tensor(data)
+            n_episodes, n_steps = data_tensor.shape[0], data_tensor.shape[1]
+            self.episode_lens = torch.full(size=(n_episodes,), fill_value=n_steps, dtype=torch.long)
+            self.sample_to_episode = torch.arange(len(self.episode_lens)).repeat_interleave(n_steps)
+            self.data = data_tensor.reshape(n_episodes * n_steps, *data_tensor.shape[2:])
 
-        idx *= self.shift
-        if not self._drop_last:
-            traj_index = idx // self.num_steps
-            step_index = idx % self.num_steps
-        else:
-            traj_index = idx // (self.num_steps - (self.context + self.horizon - 1))
-            step_index = idx % (self.num_steps - (self.context + self.horizon - 1))
-
-        end_current = step_index + self.context
-        end_future = end_current + self.horizon
-
-        seq_current = self.data[traj_index, step_index:end_current]
-        seq_future = self.data[traj_index, end_current:end_future]
-        if self._on_demand_device_load:
-            seq_current = seq_current.to(self._device)
-            seq_future = seq_future.to(self._device)
-        return self._convert_to_tuple(
-            {
-                "data": seq_current if self._transforms is None else self._transforms(seq_current),
-                "targets": seq_future if self._transforms is None else self._transforms(seq_future),
-            }
-        )
-
-    def split(self, percentage: float, generator: Optional[torch.Generator] = None):
-        if percentage == 0:
-            return None
-        (split_1_data, _), (split_2_data, _) = self._split(percentage, generator=generator)
-        transforms = self._transforms
-        self.__init__(
-            data=split_1_data,
-            horizon=self.horizon,
-            context=self.context,
-            drop_last=self._drop_last,
-            shift=self.shift,
-            loop=self._loop,
-            on_demand_device_load=self._on_demand_device_load,
-            device=self._device,
-            return_tuple=self._return_tuple,
-        )
-        self.set_transforms(transforms)
-        splitted = TrajectoryDataset(
-            data=split_2_data,
-            horizon=self.horizon,
-            context=self.context,
-            drop_last=self._drop_last,
-            shift=self.shift,
-            loop=self._loop,
-            on_demand_device_load=self._on_demand_device_load,
-            device=self._device,
-            return_tuple=self._return_tuple,
-        )
-        splitted.set_transforms(self._transforms)
-        return splitted
-
-    def convert_to_dataset(self):
-        # transforms = self._transforms
-        instances = self[:]
-        dataset = Dataset(instances["data"], instances["targets"])
-        # dataset.set_transforms(transforms)
-        return dataset
-
-    def size(self, dim: Optional[int] = None) -> Union[List[int], int]:
-        return list(self[:]["data"].size(dim)) if dim is None else self[:]["data"].size(dim)
-
-    def __prepare_data(self):
-        if not (self._loop or self._drop_last):
-            self.data = torch.cat(
-                [self.data, self.data[:, [-1], :].repeat(1, (self.context + self.horizon), 1)],
-                dim=1,
+        elif isinstance(data, list):
+            n_episodes = len(data)
+            self.episode_lens = torch.tensor([len(d) for d in data], dtype=torch.long)
+            self.sample_to_episode = torch.cat(
+                [torch.full(size=(self.episode_lens[i],), fill_value=i) for i in range(n_episodes)],
+                dim=-1,
             )
-        elif self._drop_last:
-            ...
-        else:
-            if self.horizon * 2 >= self.num_steps:
-                self.data = torch.cat(
-                    [self.data, self.data[:, : self.horizon, :].repeat(1, 2, 1)], dim=1
+            self.data = torch.cat([torch.as_tensor(d) for d in data], dim=0)
+
+        elif isinstance(data, dict):
+            self.data = {}
+            first_val = next(iter(data.values()))
+
+            if isinstance(first_val, (torch.Tensor, np.ndarray)):
+                n_episodes, n_steps = first_val.shape[0], first_val.shape[1]
+                self.episode_lens = torch.full(
+                    size=(n_episodes,), fill_value=n_steps, dtype=torch.long
                 )
-            else:
-                self.data = torch.cat(
-                    [self.data, self.data[:, : (self.context + self.horizon), :]], dim=1
+                self.sample_to_episode = torch.arange(len(self.episode_lens)).repeat_interleave(
+                    n_steps
+                )
+            elif isinstance(first_val, list):
+                n_episodes = len(first_val)
+                self.episode_lens = torch.tensor([len(d) for d in first_val], dtype=torch.long)
+                self.sample_to_episode = torch.cat(
+                    [
+                        torch.full(size=(self.episode_lens[i],), fill_value=i)
+                        for i in range(n_episodes)
+                    ],
+                    dim=-1,
                 )
 
-    def __batched_get(self, idxs: Union[slice, list]):
-        idx_list = None
-        if isinstance(idxs, slice):
-            start = idxs.start
-            start = 0 if start is None else start
+            for key, val in data.items():
+                val_tensor = torch.as_tensor(val) if not isinstance(val, list) else val
+                if isinstance(val_tensor, torch.Tensor):
+                    self.data[key] = val_tensor.reshape(-1, *val_tensor.shape[2:])
+                elif isinstance(val, list):
+                    self.data[key] = torch.cat([torch.as_tensor(d) for d in val], dim=0)
 
-            stop = idxs.stop
-            stop = len(self) if stop is None else stop
+        self.episode_end = torch.cumsum(self.episode_lens, dim=-1)
+        self.episode_start = torch.cat([torch.tensor([0], dtype=torch.long), self.episode_end[:-1]])
 
-            step = idxs.step
-            step = 1 if step is None else step
-            start, stop, step = start * self.shift, stop * self.shift, step * self.shift
-            idx_list = torch.arange(start, stop, step)
-        else:
-            idx_list = torch.tensor(idxs) * self.shift
+    def _prepare_idx(
+        self, idx: int | list[int] | tuple[int] | slice | torch.Tensor
+    ) -> torch.Tensor:
+        if isinstance(idx, int):
+            return torch.tensor([idx]).long()
+        elif isinstance(idx, (list, tuple)):
+            return torch.tensor(idx).long()
+        elif isinstance(idx, slice):
+            start, stop, step = idx.indices(self.data.size(0))
+            return torch.arange(start, stop, step, dtype=torch.long)
+        elif isinstance(idx, torch.Tensor):
+            return idx.long()
 
-        if not self._drop_last:
-            traj_idx_list = (idx_list // self.num_steps).unsqueeze(-1)
-            step_idx_list = idx_list % self.num_steps
-        else:
-            traj_idx_list = (
-                idx_list // (self.num_steps - (self.context + self.horizon - 1))
-            ).unsqueeze(-1)
-            step_idx_list = idx_list % (self.num_steps - (self.context + self.horizon - 1))
+    @staticmethod
+    def _default_pad_left(input: torch.Tensor, pad_len: torch.Tensor) -> torch.Tensor:
+        return torch.cat([input[0:1].repeat_interleave(pad_len, dim=0), input], dim=0)
+        # padded = [
+        #     torch.cat([x[0:1].repeat_interleave(n, dim=0), x], dim=0)
+        #     for x, n in zip([input], [pad_len])
+        # ]
+        # return torch.stack(padded, dim=0)
 
-        step_idx_list_data = batch_arange(step_idx_list, step_idx_list + self.context)
-        step_idx_list_targets = batch_arange(
-            step_idx_list + self.context, step_idx_list + (self.context + self.horizon)
-        )
-
-        seq_current = self.data[traj_idx_list, step_idx_list_data]
-        seq_future = self.data[traj_idx_list, step_idx_list_targets]
-        if self._on_demand_device_load:
-            seq_current = seq_current.to(self._device)
-            seq_future = seq_future.to(self._device)
-
-        return self._convert_to_tuple(
-            {
-                "data": (
-                    seq_current
-                    if self._transforms is None
-                    else self._vectorized_transforms(seq_current)
-                ),
-                "targets": (
-                    seq_future
-                    if self._transforms is None
-                    else self._vectorized_transforms(seq_future)
-                ),
-            }
-        )
+    @staticmethod
+    def _default_pad_right(input: torch.Tensor, pad_len: torch.Tensor) -> torch.Tensor:
+        return torch.cat([input, input[-1:].repeat_interleave(pad_len, dim=0)], dim=0)
+        # padded = [
+        #     torch.cat([x, x[-1:].repeat_interleave(n, dim=0)], dim=0)
+        #     for x, n in zip(input, pad_len)
+        # ]
+        # return torch.stack(padded, dim=0)
