@@ -7,15 +7,21 @@ version = "0.1.0"
 
 [tasks]
 
-[dependencies]
-python = "==3.12"
-wandb = ">=0.24.2,<0.25"
-scipy = ">=1.17.1,<2"
+[system-requirements]
 
+[dependencies]
+python = ">=3.12"
+scipy = ">=1.17.1,<2"
+wandb = ">=0.26.1,<0.27"
+imageio = ">=2.37.0,<3"
 
 [pypi-dependencies]
-torch = { version = "*", index = "https://download.pytorch.org/whl/cu130" }
-matplotlib = ">=3.10.8, <4"
-diffusers = ">=0.37.0, <0.38"
-pytest = ">=9.0.3, <10"
-h5py = ">=3.16.0, <4"
+torch = { version = "==2.11.0", index = "https://download.pytorch.org/whl/cu130" }
+
+[feature.test.dependencies]
+pytest = "*"
+h5py = "*"
+
+[environments]
+default = { features = [], solve-group = "default" }
+test = { features = ["test"], solve-group = "default" }

@@ -18,3 +18,5 @@ extra/
 .pixi/*
 !.pixi/config.toml
 !pixi.lock
+scripts/*
+mutagen.yml

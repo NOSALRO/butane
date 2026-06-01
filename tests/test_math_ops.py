@@ -31,13 +31,12 @@ class TestMathOps(unittest.TestCase):
     def test_max_around(self):
         x = torch.randn(2, 3, 4, 5)
         max_v = butane.apply_around_dim(torch.max, x, 1)
-        print(max_v.size())
 
     def test_odeint(self):
-        func = lambda t, x, y: (x, y)
+        func = lambda t, x: (x[0], x[1])
         x = torch.randn(4, 5)
         y = torch.zeros_like(x)
-        print(butane.math.odeint(func, (x, y), torch.linspace(0, 1, 10), 'euler')[0])
+        print(butane.math.odeint(func, (x, y), torch.linspace(0, 1, 10), 'heun2', return_func_outputs=True))
 
 if __name__ == '__main__':
     unittest.main()

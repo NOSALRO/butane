@@ -1,57 +1,78 @@
-import unittest
+import os
+import shutil
+import time
+import sys
+from pathlib import Path
 import torch
-import butane
+import torch.nn as nn
+import wandb
+from unittest.mock import patch
 
-class TestLogger(unittest.TestCase):
+# ==========================================
+# IMPORT YOUR ACTUAL LOGGER HERE
+# ==========================================
+from butane.logger import ModelLogger
 
-    def test_logger(self):
-        logger = butane.logger.ModelLogger(".tmp/test/", overwrite=True, use_tb=True)
-        logger.add_stats(loss=0.9)
-        logger.add_stats(loss=0.8, y=100)
-        logger.add_stats(loss=0.7, x=100.439409234802348)
-        logger.add_stats(loss=0.7, x=100.439409234802348)
-        logger.add_stats(loss=0.7, x=100.439409234802348)
-        logger.add_stats(loss=0.7, x=100.439409234802348)
-        logger.add_stats(loss=0.6)
+# A tiny model to satisfy the required `model` argument in load_checkpoint/checkpoint
+class DummyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(10, 2)
 
-        model = torch.nn.Sequential(torch.nn.Linear(10, 10))
-        print(torch.nn.utils.parameters_to_vector(model.parameters()).norm())
-        scaler = butane.data.StandardScaler()
-        scaler.fit(torch.randn(100, 2, 3))
-        optim = torch.optim.Adam(model.parameters(), betas=(0.8, 0.7))
-        lrs=torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=100)
-        logger.add_logs(f=100, model=model)
-        logger.checkpoint(1, model=model, optimizer=optim, lr_scheduler=lrs, scaler=scaler)
-        # logger.load_stats(1)
-        states = butane.nn.utils.load_state(".tmp/test/checkpoint_1", model=model, lr_scheduler=lrs, optimizer=optim, scaler=scaler)
-        # states = logger.load_checkpoint(1, model=model, lr_scheduler=lrs, optimizer=optim, scaler=scaler)
-        print(torch.nn.utils.parameters_to_vector(model.parameters()).norm())
-        # print(states)
-        # model = states.get("model")
-        # scaler = states.get("scaler")
+def run_full_lifecycle_test():
+    test_dir = "./test_wandb_lifecycle"
+    model = DummyModel()
+        
+    print("\n🚀 [PHASE 1] Initial Baseline (overwrite=True, folder doesn't exist yet)")
+    # We mock 'y' just in case, but the prompt shouldn't trigger since the folder is missing.
+    logger1 = ModelLogger(fpath=test_dir, overwrite=True, resume=False, eval_mode=False, use_wandb=True)
+    
+    for step in range(1, 4): # Steps 1, 2, 3
+        logger1.add_stats(loss=10.0 / step)
+        logger1.checkpoint(model=model)
+        logger1.commit()
+        time.sleep(1)
+        
+    wandb.finish() 
+    
+    print("\n🌿 [PHASE 2] Branching & Stats Replay (overwrite=False, resume=True)")
+    # This will load Step 3, rename the run, and replay Steps 1-3 into the new WandB dashboard!
+    logger2 = ModelLogger(fpath=test_dir, overwrite=False, resume=True, eval_mode=False, use_wandb=True)
+    logger2.load_checkpoint(step=3, model=model) 
+    
+    for step in range(4, 6): # Steps 4, 5
+        logger2.add_stats(loss=5.0 / step)
+        logger2.checkpoint(model=model)
+        logger2.commit()
+        time.sleep(1)
+        
+    wandb.finish()
 
-    # def test_monitoring(self):
-    #     mm = butane.logger.ModelMonitor(
-    #         increase_keys=["x1", "x2"],
-    #         # decrease_keys=["y1", "y2"],
-    #         tolerance=0.1
-    #     )
-    #     s1 = dict(
-    #         x1=1,
-    #         x2=2,
-    #         y1=3,
-    #         y2=4
-    #     )
-    #     mm(1, s1)
+    print("\n🔍 [PHASE 3] Eval Mode (eval_mode=True)")
+    # Validating that no timestamp folders are created and WandB stays offline.
+    logger3 = ModelLogger(fpath=test_dir, overwrite=False, resume=False, eval_mode=True, use_wandb=True)
+    
+    assert logger3.fpath.name == Path(test_dir).name, "Eval mode accidentally created a timestamped folder!"
+    assert not getattr(logger3, '_use_wandb', True), "Eval mode failed to disable WandB!"
+    print("✅ Eval mode successfully blocked timestamping and WandB init.")
 
-    #     s2 = dict(
-    #         x1=1.5,
-    #         x2=1.8,
-    #         y1=2.9,
-    #         y2=3.5,
-    #     )
-    #     mm(2, s2)
+    print("\n🔥 [PHASE 4] Hard Overwrite & Deletion (overwrite=True, resume=True)")
+    # This WILL trigger the prompt because the folder exists. The mock will answer 'y'.
+    # It should delete Phase 1 and Phase 2 from the server, then start fresh from Step 5!
+    with patch('builtins.input', return_value='y'):
+        logger4 = ModelLogger(fpath=test_dir, overwrite=True, resume=True, eval_mode=False, use_wandb=True)
+    
+    logger4.load_checkpoint(step=5, model=model)
+    
+    for step in range(6, 8): # Steps 6, 7
+        logger4.add_stats(loss=0.1)
+        logger4.checkpoint(model=model)
+        logger4.commit()
+        time.sleep(1)
+        
+    wandb.finish()
+    print("\n✅ All tests complete! The matrix is bulletproof.")
 
-
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+    assert "WANDB_PROJECT" in os.environ, "Please set WANDB_PROJECT before running."
+    run_full_lifecycle_test()

@@ -3,7 +3,7 @@
 
 int main()
 {
-    torch::Tensor rdata = torch::empty({1e+6, 2}).uniform_(static_cast<double>(-1), static_cast<double>(1));
+    torch::Tensor rdata = torch::empty({static_cast<int>(1e+6), 2}).uniform_(static_cast<double>(-1), static_cast<double>(1));
     rdata = rdata.to(torch::Device(torch::kCUDA));
     butane::clustring::MiniBatchKMeans kmeans(200, butane::KMeansPlusPlus, 1024, 500, 1e-4, 3);
     kmeans.fit(rdata);

@@ -7,17 +7,22 @@ import matplotlib.pyplot as plt
 
 @torch.no_grad()
 def eval_model(model, flow_matching, fpath=None):
-    x0 = flow_matching.source_distribution().sample((10,))
+    x0 = flow_matching.source_distribution().sample((2, 10,))
     test_cond = (torch.load('data/mnist/mnist_train_data.pt') * 2) - 1
-    generations = flow_matching.flow(
+    generations, v = flow_matching.log_likelihood(
         model=model,
         x0=x0,
         n_timesteps=100,
         # condition=torch.randn_like(x0),
         condition=test_cond[5000: 5010],
-        multiple_gen_per_condition=False,
-        keep_record=True,
+        multiple_gen_per_condition=True,
+        method='euler',
+        edm_time_grid=True,
+        # keep_record=False,
+        # edm_time_grid=True,
+        # return_model_outputs=True,
     )
+    print(generations.size(), v.size())
     generations = generations[0, -1].moveaxis(1, -1).cpu()
     for i in range(generations.size(0)):
         fig, ax = plt.subplots()
@@ -36,11 +41,11 @@ if __name__ == "__main__":
     parser.add_argument("--fpath", type=str)
     args = parser.parse_args()
 
-    dev = torch.device("cuda")
+    dev = torch.device("xpu")
 
     ds = butane.data.Dataset(
         (torch.load('data/mnist/mnist_train_data.pt') * 2) - 1,
-        torch.load("data/mnist_train_targets.pt"),
+        torch.load("data/mnist/mnist_train_targets.pt"),
         on_demand_device_load=True,
         device='cpu'
     )
@@ -52,14 +57,26 @@ if __name__ == "__main__":
 
     class_conditioned = False
 
-    model = butane.nn.DiT(
+    model = butane.nn.DiT2d(
         [1, 28, 28],
-        depth=12,
+        depth=2,
         hidden_dims=384,
-        patch_size=4
+        patch_size=4,
+        output_channels=None,
+        time_embedding_size=64,
+        embedding_size=None,
+        embedder=None,
+        learnable_embeddings=False,
+        learnable_input_embeddings=False,
+        learnable_condition_embeddings=False,
+        adaLN_zero_path=True,
+        cross_attention_condition=False,
+        additive_condition=False,
+        in_context_condition=False,
+        condition_input_dims=None,
+        condition_patch_size=None,
+        n_classes=None,
     ).to(dev)
-    print(torch.nn.utils.parameters_to_vector(model.parameters()).size())
-    exit()
 
     fm = butane.nn.ConditionalFlowMatching(0.02).to(dev)
     fm.set_source_distribution(torch.distributions.Independent(torch.distributions.Normal(torch.zeros(1, 28, 28), torch.ones(1, 28, 28)), 3))
@@ -67,7 +84,7 @@ if __name__ == "__main__":
     ema = butane.nn.EMA(model=model, decay=0.9999)
     logger = butane.logger.ModelLogger(".tmp/mnist_fm_dit", overwrite=True)
 
-    epochs = 10000
+    epochs = 1
     for epoch in range(epochs):
         sum_loss = 0.0
         sum_grad_norm = 0
@@ -79,7 +96,7 @@ if __name__ == "__main__":
             t = fm.sample_timesteps(x1.size(0))
             x_t, u_t = fm(x0, x1, t)
 
-            v_t = model(x_t.to(dev), t, x1)
+            v_t = model(x_t.to(dev), t)
             loss = torch.mean((v_t - u_t) ** 2)
             loss.backward()
 
@@ -96,10 +113,10 @@ if __name__ == "__main__":
         print(f"Epochs {epoch + 1} -> Loss: {sum_loss/len(dl)} Grad Norm: {sum_grad_norm / len(dl)}")
         if ((epoch + 1) % 10) == 0:
             logger.checkpoint(epoch + 1, model=model, optimizer=optimizer, ema=ema)
-            ema.apply()
+            ema.enable()
             model.eval()
             eval_model(model, fm, logger.output_path)
-            ema.undo()
+            ema.disable()
             model.train()
             logger.checkpoint(epoch+1, model=model, optimizer=optimizer, ema=ema)
 
