@@ -111,8 +111,8 @@ class _AttentionTemplate(torch.nn.Module):
                 value=_v,
                 attn_mask=mask.bool() if mask is not None else None,
                 is_causal=self._causal,
-                dropout_p=self.dropout.p if self.training else 0.0, # <-- ADD THIS
-                scale=1.0 / self.scale_factor
+                dropout_p=self.dropout.p if self.training else 0.0,
+                scale=1.0 / self.scale_factor,
             )
 
         if self._n_heads > 1:
@@ -319,3 +319,13 @@ class SpatialCrossAttention1d(SpatialCrossAttention):
 class SpatialCrossAttention2d(SpatialCrossAttention):
     conv = torch.nn.Conv2d
     N = 2
+
+
+class SpatialSelfAttention3d(SpatialSelfAttention):
+    conv = torch.nn.Conv3d
+    N = 3
+
+
+class SpatialCrossAttention3d(SpatialCrossAttention):
+    conv = torch.nn.Conv3d
+    N = 3

@@ -22,6 +22,10 @@ torch = { version = "==2.11.0", index = "https://download.pytorch.org/whl/cu130"
 pytest = "*"
 h5py = "*"
 
+[feature.examples.dependencies]
+matplotlib = "*"
+
 [environments]
 default = { features = [], solve-group = "default" }
 test = { features = ["test"], solve-group = "default" }
+examples = { features = ["examples"], solve-group = "default" }

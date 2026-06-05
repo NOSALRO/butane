@@ -124,6 +124,35 @@ class TrajectoryDataset(Dataset):
     def __len__(self) -> int:
         return len(self.sample_to_episode)
 
+    @staticmethod
+    def flatten_dict(d: dict[str, Any], parent_key: str = "", sep: str = ".") -> dict[str, Any]:
+        if not isinstance(d, dict): return d
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(flatten_dict(v, new_key, sep=sep).items())
+            else:
+                items.append((new_key, torch.as_tensor(v)))
+        return dict(items)
+
+    @staticmethod
+    def _get_size_recursively(d: dict[str, Any]):
+        size_d = dict()
+        for k, v in d.items():
+            if isinstance(v, dict):
+                size_d[k] = TrajectoryDataset._get_size_recursively(v)
+            else:
+                size_d[k] = torch.as_tensor(v.shape)
+        return size_d
+
+    def sizes(self) -> dict[str, Any]:
+        dummy_sample = self.__getitem__(0)
+        _sizes = dict(data=dict(), targets=dict())
+        _sizes["data"] = self._get_size_recursively(dummy_sample["data"])
+        _sizes["targets"] = self._get_size_recursively(dummy_sample["targets"])
+        return _sizes
+
     def _ingest_data(self, data: Any):
         raw_dict = data if isinstance(data, dict) else {"_internal": data}
 
@@ -140,6 +169,8 @@ class TrajectoryDataset(Dataset):
         elif isinstance(first_val, (list, tuple)):
             n_episodes = len(first_val)
             for key, val in raw_dict.items():
+                if isinstance(val, dict):
+                    raise TypeError("Dictionary should have max depth of 1. Use `TrajectoryDataset.faltten_dict` to flatten it.")
                 self.data[key] = [torch.as_tensor(d, device=self._device) for d in val]
 
         sample_to_episode = []
