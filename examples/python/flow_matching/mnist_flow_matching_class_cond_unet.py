@@ -64,7 +64,7 @@ if __name__ == "__main__":
     )
     class_conditioned = False
 
-    model = butane.nn.UNet2d(
+    model = butane.nn.unet.UNet2d(
         input_dims=[1, 28, 28],
         channels=[64, 128, 128],
         n_residual_blocks=2,

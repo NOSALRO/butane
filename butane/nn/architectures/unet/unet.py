@@ -79,7 +79,7 @@ class UNetNd(torch.nn.Module):
         time_embedding_size: int | None = None,
         time_scaling_coeff: float = 1.0,
         embedding_size: int | None = None,
-        embedder: torch.nn.Module | None = None,
+        embedder: torch.nn.Module = FourierEmbeddings,
         learn_embeddings: bool = False,
         n_classes: int | None = None,
         class_drop_prob: float = 0.0,
@@ -125,7 +125,7 @@ class UNetNd(torch.nn.Module):
             ),
             embedding_size=embedding_size,
             learn_embeddings=learn_embeddings,
-            embedder=FourierEmbeddings if embedder is None else embedder,
+            embedder=embedder,
         )
         self._setup_class_condition()
 

@@ -11,7 +11,6 @@ import butane
 @torch.no_grad()
 def eval_model(
     model: torch.nn.Module,
-    condition: torch.Tensor,
     fm: butane.nn.FlowMatching,
     ema: torch.nn.Module | None = None,
     logger: butane.logger.ModelLogger | None = None,
@@ -24,9 +23,7 @@ def eval_model(
     generations = fm.flow(
         model=model,
         x0=x0,
-        condition=condition[:x0.shape[0]],
         n_timesteps=100,
-        guidance_scale=2.0,
         keep_record=True,
     )
     generations = generations[-1].moveaxis(1, -1).cpu()
@@ -38,7 +35,6 @@ def eval_model(
     for i in range(10):
         fig, ax = plt.subplots()
         ax.imshow(generations[i])
-        ax.set_title(condition[i].item())
         if logger is not None:
             logger.add_image(f"outputs_{i}.png", fig)
         else:
@@ -56,11 +52,9 @@ if __name__ == "__main__":
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     data = ((torch.load("data/mnist/mnist_train_data.pt") / 255.) * 2) - 1
-    targets = torch.load("data/mnist/mnist_train_targets.pt")
-    test_targets = torch.load("data/mnist/mnist_test_targets.pt")
     ds = butane.data.Dataset(
         data=data,
-        targets=targets,
+        targets=torch.load("data/mnist/mnist_train_targets.pt"),
         on_demand_device_load=False,
         device="cpu",
     )
@@ -70,7 +64,7 @@ if __name__ == "__main__":
     )
     class_conditioned = False
 
-    model = butane.nn.UNet2d(
+    model = butane.nn.unet.UNet2d(
         input_dims=[1, 28, 28],
         channels=[64, 128, 128],
         n_residual_blocks=2,
@@ -90,8 +84,7 @@ if __name__ == "__main__":
         embedding_size=None,
         embedder=None,
         learn_embeddings=False,
-        n_classes=10,
-        class_drop_prob=0.2,
+        n_classes=None,
     ).to(device)
     print(
         f" Model Parameters: {torch.nn.utils.parameters_to_vector(model.parameters()).size()[0]}"
@@ -105,19 +98,18 @@ if __name__ == "__main__":
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     ema = butane.nn.EMA(model=model, decay=0.9999)
-    logger = butane.logger.ModelLogger(".tmp/mnist_fm_cfg", overwrite=True, eval_mode=args.eval_only)
+    logger = butane.logger.ModelLogger(".tmp/mnist_fm_tb", overwrite=True, eval_mode=args.eval_only)
 
     if not args.eval_only:
         training_steps = 10000
         for s in range(training_steps):
             batch = next(dl)
             x1 = batch["data"].to(device, non_blocking=True)
-            c = batch["targets"].to(device, non_blocking=True)
             x0 = fm.source_distribution().sample((x1.size(0),)).to(x1.device)
             t = fm.sample_timesteps(x1.size(0))
             x_t, u_t = fm(x0, x1, t)
 
-            v_t = model(x_t.to(device), t, c)
+            v_t = model(x_t.to(device), t)
             loss = torch.mean((v_t - u_t.to(device)) ** 2)
 
             optimizer.zero_grad()
@@ -131,7 +123,7 @@ if __name__ == "__main__":
                 print(f"Step {s} -> Loss: {loss.item()} Grad Norm: {grad_norm}")
             if ((s + 1) % 1000) == 0:
                 logger.checkpoint(model=model, optimizer=optimizer, ema=ema)
-                eval_model(model=model, condition=test_targets, fm=fm, ema=ema, logger=logger)
+                eval_model(model=model, fm=fm, ema=ema, logger=logger)
             logger.step()
     else:
         logger.load_checkpoint(
@@ -140,11 +132,10 @@ if __name__ == "__main__":
             optimizer=optimizer,
             ema=ema,
         )
-    model.eval()
-    eval_model(
-        model=model,
-        condition=test_targets,
-        fm=fm,
-        ema=ema,
-        logger=None,
-    )
+        model.eval()
+        eval_model(
+            model=model,
+            fm=fm,
+            ema=ema,
+            logger=None,
+        )

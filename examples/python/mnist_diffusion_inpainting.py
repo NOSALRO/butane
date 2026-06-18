@@ -12,7 +12,7 @@ if __name__ == "__main__":
     # butane.data.ops.drop_to_max_size(ds, 5000)
     dl = torch.utils.data.DataLoader(ds, batch_size=128, shuffle=True)
 
-    model = butane.nn.UNet2d(
+    model = butane.nn.unet.UNet2d(
         [1, 28, 28],
         channels=[32, 64, 128],
         self_condition=False,

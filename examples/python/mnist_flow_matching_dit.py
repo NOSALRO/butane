@@ -69,12 +69,12 @@ if __name__ == "__main__":
         learnable_embeddings=False,
         learnable_input_embeddings=False,
         learnable_condition_embeddings=False,
-        adaLN_zero_path=True,
+        adaLN_zero=True,
         cross_attention_condition=False,
         additive_condition=False,
         in_context_condition=False,
-        condition_input_dims=None,
-        condition_patch_size=None,
+        ctx_dims=None,
+        ctx_patch_size=None,
         n_classes=None,
     ).to(dev)
 
