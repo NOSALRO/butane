@@ -1,5 +1,4 @@
 import copy
-from typing import Self
 
 import torch
 
@@ -88,7 +87,7 @@ class PairDataset(Dataset):
         self,
         percentage: float,
         generator: torch.Generator | None = None,
-    ) -> Self | None:
+    ) -> object | None:
         if percentage == 0:
             return None
 
@@ -139,7 +138,7 @@ class PairDataset(Dataset):
         self.data = self.data.flatten(start_dim=dim)
         self.data_pair = self.data_pair.flatten(start_dim=dim)
 
-    def to(self, device: torch.device) -> Self:
+    def to(self, device: torch.device):
         if not self._on_demand_device_load:
             self.data = self.data.to(device)
             self.data_pair = self.data_pair.to(device)

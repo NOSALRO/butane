@@ -90,7 +90,6 @@ class PatchEmbeddingsNd(torch.nn.Module):
         n_dims = len(self._input_dims) - 1 # remove channel dim
         self._d_model = d_model
 
-        # TODO: If 3D, add option to use patch_size (1, patch_size, patch_size)
         self._patch_size = patch_size
         if not isinstance(patch_size, (tuple, list)):
             self._patch_size = tuple([patch_size for _ in range(n_dims)])
