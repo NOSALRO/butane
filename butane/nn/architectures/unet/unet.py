@@ -240,10 +240,10 @@ class UNetNd(torch.nn.Module):
                     )
             self.middle_blocks.append(_subblock)
 
-        _mid_dims = copy.deepcopy(_middle_input_dims)
-        self._bottleneck_res = (
-            _mid_dims.numpy().tolist() if hasattr(_mid_dims, "numpy") else list(_mid_dims)
-        )
+        # _mid_dims = copy.deepcopy(_middle_input_dims)
+        # self._bottleneck_res = (
+        #     _mid_dims.cpu().numpy().tolist() if hasattr(_mid_dims, "numpy") else list(_mid_dims)
+        # )
         self.upsample_blocks = torch.nn.ModuleList([])
         _upsample_input_dims = copy.deepcopy(_middle_input_dims)
         for i, ch in reversed(list(enumerate(self._channels))):

@@ -81,10 +81,10 @@ class FlowMatching(torch.nn.Module):
             timesteps = self.edm_time_grid(n_timesteps=n_timesteps, reverse=reverse).to(self.device)
         else:
             timesteps = torch.linspace(
-                0. if not reverse else 1.,
-                1. if not reverse else 0.,
-                n_timesteps + 1,
-                device=self.device
+                0.0 if not reverse else 1.0 - 1e-05,
+                1.0 - 1e-05 if not reverse else 0.0,
+                n_timesteps,
+                device=self.device,
             )
 
         if multiple_gen_per_condition:

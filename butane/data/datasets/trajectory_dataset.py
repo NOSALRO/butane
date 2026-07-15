@@ -137,20 +137,20 @@ class TrajectoryDataset(Dataset):
         return dict(items)
 
     @staticmethod
-    def _get_size_recursively(d: dict[str, Any]):
+    def _get_size_recursively(d: dict[str, Any], device: torch.device) -> dict[str, torch.Tensor]:
         size_d = dict()
         for k, v in d.items():
             if isinstance(v, dict):
                 size_d[k] = TrajectoryDataset._get_size_recursively(v)
             else:
-                size_d[k] = torch.as_tensor(v.shape)
+                size_d[k] = torch.as_tensor(v.shape, device=device)
         return size_d
 
     def sizes(self) -> dict[str, Any]:
         dummy_sample = self.__getitem__(0)
         _sizes = dict(data=dict(), targets=dict())
-        _sizes["data"] = self._get_size_recursively(dummy_sample["data"])
-        _sizes["targets"] = self._get_size_recursively(dummy_sample["targets"])
+        _sizes["data"] = self._get_size_recursively(dummy_sample["data"], device=self._device)
+        _sizes["targets"] = self._get_size_recursively(dummy_sample["targets"], device=self._device)
         return _sizes
 
     def _ingest_data(self, data: Any):

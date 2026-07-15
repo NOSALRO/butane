@@ -15,9 +15,6 @@ scipy = ">=1.17.1,<2"
 wandb = ">=0.26.1,<0.27"
 imageio = ">=2.37.0,<3"
 
-[pypi-dependencies]
-torch = { version = "==2.11.0", index = "https://download.pytorch.org/whl/cu130" }
-
 [feature.test.dependencies]
 pytest = "*"
 h5py = "*"
@@ -29,3 +26,6 @@ matplotlib = "*"
 default = { features = [], solve-group = "default" }
 test = { features = ["test"], solve-group = "default" }
 examples = { features = ["examples"], solve-group = "default" }
+
+[pypi-dependencies]
+torch = ">=2.13.0, <3"
